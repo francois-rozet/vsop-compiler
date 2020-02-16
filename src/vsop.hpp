@@ -1,32 +1,32 @@
 #include "bnf.hpp"
 
 // Special characters
-expr_ptr all = special([](Cursor& x) { ++x; return true; });
+static expr_ptr all = special([](Cursor& x) { ++x; return true; });
 
-expr_ptr null = equality('\0');
-expr_ptr backspace = equality('\b');
-expr_ptr tab = equality('\t');
-expr_ptr lf = equality('\n');
-expr_ptr ff = equality('\f');
-expr_ptr cr = equality('\r');
-expr_ptr double_quote = equality('\"');
-expr_ptr backslash = equality('\\');
+static expr_ptr null = equality('\0');
+static expr_ptr backspace = equality('\b');
+static expr_ptr tab = equality('\t');
+static expr_ptr lf = equality('\n');
+static expr_ptr ff = equality('\f');
+static expr_ptr cr = equality('\r');
+static expr_ptr double_quote = equality('\"');
+static expr_ptr backslash = equality('\\');
 
-expr_ptr space = equality(' ');
-expr_ptr underscore = equality('_');
+static expr_ptr space = equality(' ');
+static expr_ptr underscore = equality('_');
 
 // Letters
-expr_ptr lowercase_letter = range('a', 'z');
-expr_ptr uppercase_letter = range('A', 'Z');
-expr_ptr letter = lowercase_letter | uppercase_letter;
+static expr_ptr lowercase_letter = range('a', 'z');
+static expr_ptr uppercase_letter = range('A', 'Z');
+static expr_ptr letter = lowercase_letter | uppercase_letter;
 
 // Digits
-expr_ptr digit = range('0', '9');
-expr_ptr hex_digit = digit | range('a', 'f') | range('A', 'F');
-expr_ptr hex_prefix = equality("0x");
+static expr_ptr digit = range('0', '9');
+static expr_ptr hex_digit = digit | range('a', 'f') | range('A', 'F');
+static expr_ptr hex_prefix = equality("0x");
 
 // Keywords
-expr_ptr keyword = equality("and") |
+static expr_ptr keyword = equality("and") |
 	equality("bool") | equality("class") | equality("do") |
 	equality("else") | equality("extends") | equality("false") |
 	equality("if") | equality("in") | equality("int32") |
@@ -35,66 +35,72 @@ expr_ptr keyword = equality("and") |
 	equality("true") | equality("unit") | equality("while");
 
 // Operators
-expr_ptr lbrace = equality('{');
-expr_ptr rbrace = equality('}');
-expr_ptr lpar = equality('(');
-expr_ptr rpar = equality(')');
-expr_ptr colon = equality(':');
-expr_ptr semicolon = equality(';');
-expr_ptr comma = equality(',');
-expr_ptr plus_sign = equality('+');
-expr_ptr minus_sign = equality('-');
-expr_ptr asterisk = equality('*');
-expr_ptr slash = equality('/');
-expr_ptr pow = equality('^');
-expr_ptr dot = equality('.');
-expr_ptr equal_sign = equality('=');
-expr_ptr lower = equality('<');
-expr_ptr lower_equal = equality("<=");
-expr_ptr assign = equality("<-");
+static expr_ptr lbrace = equality('{');
+static expr_ptr rbrace = equality('}');
+static expr_ptr lpar = equality('(');
+static expr_ptr rpar = equality(')');
+static expr_ptr colon = equality(':');
+static expr_ptr semicolon = equality(';');
+static expr_ptr comma = equality(',');
+static expr_ptr plus_sign = equality('+');
+static expr_ptr minus_sign = equality('-');
+static expr_ptr asterisk = equality('*');
+static expr_ptr slash = equality('/');
+static expr_ptr pow = equality('^');
+static expr_ptr dot = equality('.');
+static expr_ptr equal_sign = equality('=');
+static expr_ptr lower = equality('<');
+static expr_ptr lower_equal = equality("<=");
+static expr_ptr assign = equality("<-");
 
 // Identifiers
-expr_ptr base_identifier = (letter | digit | underscore)++;
-expr_ptr type_identifier = uppercase_letter + base_identifier;
-expr_ptr object_identifier = (lowercase_letter + base_identifier) - keyword;
+static expr_ptr base_identifier = (letter | digit | underscore)++;
+static expr_ptr type_identifier = uppercase_letter + base_identifier;
+static expr_ptr object_identifier = (lowercase_letter + base_identifier) - keyword;
 
 // Interger literals
-expr_ptr base10_literal = digit + digit++;
-expr_ptr base16_literal = hex_prefix + hex_digit + hex_digit++;
-expr_ptr integer_literal = base10_literal | base16_literal;
-expr_ptr invalid_integer_literal = (digit + base_identifier) - integer_literal;
+static expr_ptr base10_literal = digit + digit++;
+static expr_ptr base16_literal = hex_prefix + hex_digit + hex_digit++;
+static expr_ptr integer_literal = base10_literal | base16_literal;
+static expr_ptr invalid_integer_literal = (digit + base_identifier) - integer_literal;
 
 // String literals
-expr_ptr regular_char = all - null - lf - ff - double_quote - backslash;
-expr_ptr escape_char =
+static expr_ptr regular_char = all - null - lf - ff - double_quote - backslash;
+static expr_ptr escape_char =
 	equality('b') | equality('t') | equality('n') | equality('r') |
 	double_quote | backslash |
 	(equality('x') + hex_digit + hex_digit) |
 	(lf + (space | tab)++);
 
-expr_ptr string_literal = double_quote + (regular_char | (backslash + escape_char))++ + double_quote;
+static expr_ptr string_literal = double_quote + (regular_char | (backslash + escape_char))++ + double_quote;
 
 // Whitespaces
-expr_ptr whitespace = (space | tab | lf | cr)++;
+static expr_ptr whitespace = (space | tab | lf | cr)++;
 
 // Comments
-expr_ptr tail_char = all - null - ff - lpar - asterisk;
-std::function<bool(Cursor&)> tail = [](Cursor& x) {
-	while (true) {
-		if (tail_char->f(x))
-			continue;
+static expr_ptr single_line_comment = slash + slash + (all - null - ff - lf)++ + (lf | ff);
 
-		if (asterisk->f(x)) {
-			if (rpar->f(x))
-				return true;
-		} else if (lpar->f(x)) {
-			if (asterisk->f(x) and not tail(x))
-				return false;
-		} else
+static expr_ptr multiline_char = all - null - ff - lpar - asterisk;
+static expr_ptr multiline_comment = special(
+	[](Cursor& x) {
+		if (not lpar->f(x) or not asterisk->f(x))
 			return false;
-	}
-};
 
-expr_ptr single_line_comment = slash + slash + (all - null - ff - lf)++ + (lf | ff);
-expr_ptr multiple_line_comment = lpar + asterisk + special(tail);
-expr_ptr comment = single_line_comment | multiple_line_comment;
+		while (true) {
+			if (multiline_char->f(x))
+				continue;
+
+			if (asterisk->f(x)) {
+				if (rpar->f(x))
+					return true;
+			} else if (lpar->f(x)) {
+				if (asterisk->f(x))
+					if (not multiline_comment->f(--(--x)))
+						return false;
+			} else
+				return false;
+		}
+	}
+);
+
+static expr_ptr comment = single_line_comment | multiline_comment;
