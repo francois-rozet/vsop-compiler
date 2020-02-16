@@ -1,5 +1,7 @@
 #include "bnf.hpp"
 
+#include <set>
+
 // Special characters
 static expr_ptr all = special([](Cursor& x) { ++x; return true; });
 
@@ -25,15 +27,6 @@ static expr_ptr digit = range('0', '9');
 static expr_ptr hex_digit = digit | range('a', 'f') | range('A', 'F');
 static expr_ptr hex_prefix = equality("0x");
 
-// Keywords
-static expr_ptr keyword = equality("and") |
-	equality("bool") | equality("class") | equality("do") |
-	equality("else") | equality("extends") | equality("false") |
-	equality("if") | equality("in") | equality("int32") |
-	equality("isnull") | equality("let") | equality("new") |
-	equality("not") | equality("string") | equality("then") |
-	equality("true") | equality("unit") | equality("while");
-
 // Operators
 static expr_ptr lbrace = equality('{');
 static expr_ptr rbrace = equality('}');
@@ -56,13 +49,21 @@ static expr_ptr assign = equality("<-");
 // Identifiers
 static expr_ptr base_identifier = (letter | digit | underscore)++;
 static expr_ptr type_identifier = uppercase_letter + base_identifier;
-static expr_ptr object_identifier = (lowercase_letter + base_identifier) - keyword;
+static expr_ptr object_identifier = lowercase_letter + base_identifier;
+
+// Keywords
+static std::set<std::string> keywords = {
+	"and", "bool", "class", "do",
+	"else", "extends", "false", "if",
+	"in", "int32", "isnull", "let",
+	"new", "not", "string", "then",
+	"true", "unit", "while"
+};
 
 // Interger literals
 static expr_ptr base10_literal = digit + digit++;
 static expr_ptr base16_literal = hex_prefix + hex_digit + hex_digit++;
 static expr_ptr integer_literal = base10_literal | base16_literal;
-static expr_ptr invalid_integer_literal = (digit + base_identifier) - integer_literal;
 
 // String literals
 static expr_ptr regular_char = all - null - lf - ff - double_quote - backslash;
@@ -75,7 +76,8 @@ static expr_ptr escape_char =
 static expr_ptr string_literal = double_quote + (regular_char | (backslash + escape_char))++ + double_quote;
 
 // Whitespaces
-static expr_ptr whitespace = (space | tab | lf | cr)++;
+static expr_ptr blankspace = space | tab | lf | cr;
+static expr_ptr whitespace = blankspace + blankspace++;
 
 // Comments
 static expr_ptr single_line_comment = slash + slash + (all - null - ff - lf)++ + (lf | ff);

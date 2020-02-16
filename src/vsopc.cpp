@@ -37,11 +37,12 @@ int lex(const string& filename) {
 	}
 
 	Lexer lexer(input);
+	Token t;
 
 	unsigned line, column;
 	int err = 0;
 
-	for (Token t; not lexer.end_of_file();) {
+	while (not lexer.end_of_file()) {
 		line = lexer.line() + 1;
 		column = lexer.column() + 1;
 
@@ -56,14 +57,10 @@ int lex(const string& filename) {
 		if (t.type == "end-of-file" or t.type == "whitespace" or t.type == "comment")
 			continue;
 
-		cout << line << ',' << column;
+		cout << line << ',' << column << ',' << t.type;
 
-		if (t.type == "type-identifier" or t.type == "object-identifier" or t.type == "integer-literal" or t.type == "string-literal")
-			cout << ',' << t.type << ',' << t.value;
-		else if (t.type == "keyword")
+		if (not t.value.empty())
 			cout << ',' << t.value;
-		else
-			cout << ',' << t.type;
 
 		cout << endl;
 	}
