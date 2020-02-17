@@ -83,11 +83,8 @@ static expr_ptr whitespace = blankspace + blankspace++;
 static expr_ptr single_line_comment = slash + slash + (all - null - ff - lf)++ + (lf | ff);
 
 static expr_ptr multiline_char = all - null - ff - lpar - asterisk;
-static expr_ptr multiline_comment = special(
+static expr_ptr multiline_tail = special(
 	[](Cursor& x) {
-		if (not lpar->f(x) or not asterisk->f(x))
-			return false;
-
 		while (true) {
 			if (multiline_char->f(x))
 				continue;
@@ -97,12 +94,13 @@ static expr_ptr multiline_comment = special(
 					return true;
 			} else if (lpar->f(x)) {
 				if (asterisk->f(x))
-					if (not multiline_comment->f(--(--x)))
+					if (not multiline_tail->f(x))
 						return false;
 			} else
 				return false;
 		}
 	}
 );
+static expr_ptr multiline_comment = lpar + asterisk + multiline_tail;
 
 static expr_ptr comment = single_line_comment | multiline_comment;

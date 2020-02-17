@@ -23,7 +23,7 @@ struct Token {
 class Lexer {
 	public:
 		/* Constructors */
-		Lexer(const std::vector<std::string>& input) : x_(std::make_shared<Cursor>(input)) {}
+		Lexer(const std::string& input) : x_(std::make_shared<Cursor>(input)) {}
 
 		/* Methods */
 		bool end_of_file() const { return x_->end_of_file(); };

@@ -3,23 +3,21 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <vector>
 
 using namespace std;
 
-vector<string> read(const string& filename) {
-	string line;
+string read(const string& filename) {
+	char c;
+	string input;
 	ifstream file;
-
-	vector<string> input;
 
 	file.open(filename);
 
 	if (!file.is_open())
 		throw runtime_error("error: " + filename + ": No such file or directory");
 
-	while (getline(file, line))
-		input.push_back(line);
+	while (file.get(c))
+		input += c;
 
 	file.close();
 
@@ -27,7 +25,7 @@ vector<string> read(const string& filename) {
 }
 
 int lex(const string& filename) {
-	vector<string> input;
+	string input;
 
 	try {
 		input = read(filename);
@@ -43,8 +41,8 @@ int lex(const string& filename) {
 	int err = 0;
 
 	while (not lexer.end_of_file()) {
-		line = lexer.line() + 1;
-		column = lexer.column() + 1;
+		line = lexer.line();
+		column = lexer.column();
 
 		try {
 			t = lexer.next();
@@ -69,14 +67,10 @@ int lex(const string& filename) {
 }
 
 int main(int argc, char* argv[]) {
-	string option;
-	vector<string> input;
 	unsigned errors = 0;
 
 	for (int i = 1, j; i < argc; i = j) {
-		option = argv[i];
-
-		if (option == "-lex") {
+		if (string(argv[i]) == "-lex") {
 			for (j = i + 1; j < argc; j++)
 				errors += lex(argv[j]);
 		} else {
@@ -84,7 +78,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (j == i + 1)
-			cerr << "vsopc " << option << ": error: no input file" << endl;
+			cerr << "vsopc " << argv[i] << ": error: no input file" << endl;
 	}
 
 	return errors;

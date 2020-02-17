@@ -1,6 +1,8 @@
 #include "lexer.hpp"
 #include "vsop.hpp"
 
+#include <vector>
+
 using namespace std;
 
 // Output formats
@@ -134,7 +136,7 @@ Token Lexer::next() {
 	if (this->end_of_file())
 		return {"end-of-file"};
 
-	string msg = to_string(x_->line() + 1) + ":" + to_string(x_->column() + 1) + ": lexical error: ";
+	string msg = to_string(x_->line()) + ":" + to_string(x_->column()) + ": lexical error: ";
 
 	// Forbbiden
 	Cursor y(*x_);
@@ -148,7 +150,7 @@ Token Lexer::next() {
 	Cursor z(*x_);
 
 	for (auto it = rules.begin(); it != rules.end(); it++, y = *x_)
-		if (it->expr->f(y) and not (y < z)) { // First accepted rule
+		if (it->expr->f(y) and z <= y) { // First accepted rule
 			if (it->name == "object-identifier") {
 				string value = it->value(*x_, y);
 
@@ -166,7 +168,7 @@ Token Lexer::next() {
 	// No accepting rule
 	*x_ = z;
 	if (not z.end_of_file())
-		msg = to_string(x_->line() + 1) + ":" + to_string(x_->column() + 1) + ": lexical error: ";
+		msg = to_string(x_->line()) + ":" + to_string(x_->column()) + ": lexical error: ";
 	++(*x_);
 
 	if (deepest->name == "comment" and z.end_of_file())
