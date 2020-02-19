@@ -35,44 +35,27 @@ int lex(const string& filename) {
 	}
 
 	Lexer lexer(input);
-	Token t;
-
-	unsigned line, column;
 	int err = 0;
 
-	while (not lexer.end_of_file()) {
-		line = lexer.line();
-		column = lexer.column();
-
+	while (lexer) {
 		try {
-			t = lexer.next();
+			lexer.next(true);
 		} catch (LexicalError& e) {
 			cerr << filename << ':' << e.what() << endl;
 			err++;
-			continue;
 		}
-
-		if (t.type == "end-of-file" or t.type == "whitespace" or t.type == "comment")
-			continue;
-
-		cout << line << ',' << column << ',' << t.type;
-
-		if (not t.value.empty())
-			cout << ',' << t.value;
-
-		cout << endl;
 	}
 
 	return err;
 }
 
 int main(int argc, char* argv[]) {
-	unsigned errors = 0;
+	int err = 0;
 
 	for (int i = 1, j; i < argc; i = j) {
 		if (string(argv[i]) == "-lex") {
 			for (j = i + 1; j < argc; j++)
-				errors += lex(argv[j]);
+				err = lex(argv[j]);
 		} else {
 			break;
 		}
@@ -81,5 +64,5 @@ int main(int argc, char* argv[]) {
 			cerr << "vsopc " << argv[i] << ": error: no input file" << endl;
 	}
 
-	return errors;
+	return err;
 }

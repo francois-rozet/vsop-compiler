@@ -3,7 +3,6 @@
 
 #include "cursor.hpp"
 
-#include <memory>
 #include <string>
 
 class LexicalError: public std::exception {
@@ -15,30 +14,33 @@ class LexicalError: public std::exception {
 		std::string message;
 };
 
+typedef unsigned token_type;
+
 struct Token {
-	std::string type = "";
-	std::string value = "";
+	token_type type;
+	struct {
+		std::string str;
+		int num;
+	} value = {"", 0};
 };
 
 class Lexer {
 	public:
 		/* Constructors */
-		Lexer(const std::string& input) : x_(std::make_shared<Cursor>(input)) {}
+		Lexer(const std::string& input) : x_(Cursor(input)) {}
 
 		/* Methods */
-		bool end_of_file() const { return x_->end_of_file(); };
+		operator bool() const { return x_; };
 
-		Token next();
+		Token next(bool);
 
 		/* Accessors */
-		Cursor x() const { return *x_; }
-		unsigned line() const { return x_->line(); };
-		unsigned column() const { return x_->column(); };
-		char c() const { return x_->c(); };
+		unsigned line() const { return x_.line(); };
+		unsigned column() const { return x_.column(); };
 
 	private:
 		/* Variables */
-		std::shared_ptr<Cursor> x_;
+		Cursor x_;
 };
 
 #endif

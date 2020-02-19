@@ -9,26 +9,33 @@ class Cursor {
 		Cursor(const std::string&);
 
 		/* Operators */
-		Cursor& operator =(const Cursor& x);
 		Cursor& operator ++();
-		bool operator <(const Cursor& x) const;
-		bool operator <=(const Cursor& x) const;
-		bool operator ==(const Cursor& x) const;
+		Cursor& operator =(const Cursor&);
 
-		/* Methods */
-		bool end_of_file() const { return i_ == inputLength_; };
+		bool operator <(const Cursor& x) const { return i_ < x.i_; };
+		bool operator <=(const Cursor& x) const { return i_ <= x.i_; };
+		bool operator ==(const Cursor& x) const { return i_ == x.i_; };
 
-		std::string read_to(const Cursor& y);
+		const char& operator *() const { return input_[i_]; };
+		operator bool() const { return i_ != inputLength_; };
 
 		/* Accessors */
 		unsigned line() const { return line_; }
 		unsigned column() const { return column_; }
-		char c() const { return this->end_of_file() ? '\f' : input_[i_]; }
 
 	private:
 		/* Variables */
 		const std::string& input_;
 		unsigned i_ = 0, line_ = 1, column_ = 1, inputLength_;
 };
+
+static std::string read(Cursor& x, const Cursor& y) {
+	std::string s;
+
+	for (; x < y; ++x)
+		s += *x;
+
+	return s;
+}
 
 #endif
