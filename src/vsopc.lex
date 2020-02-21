@@ -1,18 +1,18 @@
 %{
+	#define YY_USER_ACTION updateloc();
+
 	#include "define.hpp"
 
 	#include <cstdlib>
 	#include <iostream>
 	#include <string>
+	#include <vector>
 	#include <unordered_map>
 
 	extern int yylex();
 
 	/* filename */
 	std::string yyfilename;
-
-	/* error */
-	int yylerror = 0;
 
 	/* token value */
 	union {
@@ -22,65 +22,49 @@
 
 	std::string yybuffer;
 
-	std::string yylhex(char c) {
+	std::string yyhex(char c) {
 		std::string s = "\\x";
 
 		char d = c / 16;
-		s += d < 10 ? d + '0' : d + 'a' - 10;
+		s += d + (d < 10 ? '0' : 'a' - 10);
 		d = c % 16;
-		s += d < 10 ? d + '0' : d + 'a' - 10;
+		s += d + (d < 10 ? '0' : 'a' - 10);
 
 		return s;
 	}
 
 	/* token location */
+	struct loc {
+		int l; // line
+		int c; // column
+	};
+
 	struct {
-		int fl;
-		int fc;
-		int ll;
-		int lc;
-	} yylloc = {1, 1, 1, 1};
+		loc f; // first
+		loc l; // last
+	} yylloc = {{1, 1}, {1, 1}};
 
-	void catchup() {
-		yylloc.fl = yylloc.ll;
-		yylloc.fc = yylloc.lc;
-	}
+	std::vector<loc> yystack;
 
-	void forward() {
+	void updateloc() {
+		yylloc.f = yylloc.l;
+
 		for (int i = 0; i < yyleng; i++)
 			if (yytext[i] == '\n') {
-				++yylloc.ll;
-				yylloc.lc = 1;
+				++yylloc.l.l;
+				yylloc.l.c = 1;
 			} else
-				++yylloc.lc;
+				++yylloc.l.c;
 	}
 
-	void renew() {
-		catchup();
-		forward();
-	}
+	/* error */
+	int yyerror = 0;
 
-	void commentmatch() {
-		int lev = 0, i;
-
-		for (i = yybuffer.length() - 1; i > 0; --i)
-			if (lev == 1)
-				break;
-			else if (yybuffer[i - 1] == '(' and yybuffer[i] == '*')
-				++lev;
-			else if (yybuffer[i - 1] == '*' and yybuffer[i] == ')')
-				--lev;
-
-		for (int j = 0; j < i; j++)
-			if (yybuffer[j] == '\n') {
-				++yylloc.fl;
-				yylloc.fc = 1;
-			} else
-				++yylloc.fc;
-	}
-
-	/* nested comment level */
-	int level = 0;
+	void error(const std::string& s) {
+		++yyerror;
+		std::cerr << yyfilename << ':' << yylloc.f.l << ':' << yylloc.f.c << ": lexical error";
+		std::cerr << ": " << s << std::endl;
+	};
 
 	/* Keywords */
 	std::unordered_map<std::string, int> keywords = {
@@ -105,10 +89,15 @@
 		{"while", T_WHILE}
 	};
 
-	int yylobject() {
-		auto it = keywords.find(yylval.str);
-		return it == keywords.end() ? T_OBJECT_IDENTIFIER : it->second;
-	}
+	/* Escape sequences */
+	std::unordered_map<char, char> esequences = {
+		{'b', '\b'},
+		{'t', '\t'},
+		{'n', '\n'},
+		{'r', '\r'},
+		{'\\', '\\'},
+		{'\"', '\"'}
+	};
 
 	/* (Standard) output */
 	std::unordered_map<int, std::string> output = {
@@ -186,89 +175,57 @@ single_line_comment			"//"[^\0\n]*
 %x STRING COMMENT
 %%
 
-{whitespace}				renew();
-{single_line_comment}		renew();
-{type_identifier}			renew(); yylval.str = yytext; return T_TYPE_IDENTIFIER;
-{object_identifier}			renew(); yylval.str = yytext; return yylobject();
-{invalid_integer_literal}	{
-								renew(); ++yylerror;
-								std::cerr << yyfilename << ':' << yylloc.fl << ':' << yylloc.fc << ": lexical error: invalid integer literal " << yytext << std::endl;
-							}
-{base16_literal}			renew(); yylval.num = strtol(yytext, NULL, 16); return T_INTEGER_LITERAL;
-{base10_literal}			renew(); yylval.num = strtol(yytext, NULL, 10); return T_INTEGER_LITERAL;
-\"							renew(); yybuffer = yytext; BEGIN(STRING);
-"(*"						renew(); yybuffer = yytext; ++level; BEGIN(COMMENT);
-"{"							renew(); return T_LBRACE;
-"}"							renew(); return T_RBRACE;
-"("							renew(); return T_LPAR;
-")"							renew(); return T_RPAR;
-":"							renew(); return T_COLON;
-";"							renew(); return T_SEMICOLON;
-","							renew(); return T_COMMA;
-"+"							renew(); return T_PLUS;
-"-"							renew(); return T_MINUS;
-"*"							renew(); return T_TIMES;
-"/"							renew(); return T_DIV;
-"^"							renew(); return T_POW;
-"."							renew(); return T_DOT;
-"="							renew(); return T_EQUAL;
-"<="						renew(); return T_LOWER_EQUAL;
-"<-"						renew(); return T_ASSIGN;
-"<"							renew(); return T_LOWER;
+{whitespace}				/* */
+{single_line_comment}		/* */
+{type_identifier}			yylval.str = yytext; return T_TYPE_IDENTIFIER;
+{object_identifier}			yylval.str = yytext; return keywords.find(yylval.str) == keywords.end() ? T_OBJECT_IDENTIFIER : keywords[yylval.str];
+{invalid_integer_literal}	error("invalid integer-literal " + std::string(yytext));
+{base16_literal}			yylval.num = strtol(yytext, NULL, 16); return T_INTEGER_LITERAL;
+{base10_literal}			yylval.num = strtol(yytext, NULL, 10); return T_INTEGER_LITERAL;
+\"							yystack.push_back(yylloc.f); yybuffer = yytext; BEGIN(STRING);
+"(*"						yystack.push_back(yylloc.f); yybuffer = yytext; BEGIN(COMMENT);
+"{"							return T_LBRACE;
+"}"							return T_RBRACE;
+"("							return T_LPAR;
+")"							return T_RPAR;
+":"							return T_COLON;
+";"							return T_SEMICOLON;
+","							return T_COMMA;
+"+"							return T_PLUS;
+"-"							return T_MINUS;
+"*"							return T_TIMES;
+"/"							return T_DIV;
+"^"							return T_POW;
+"."							return T_DOT;
+"="							return T_EQUAL;
+"<="						return T_LOWER_EQUAL;
+"<-"						return T_ASSIGN;
+"<"							return T_LOWER;
 
-<STRING>\"					forward(); yybuffer += yytext; yylval.str = &yybuffer[0]; BEGIN(INITIAL); return T_STRING_LITERAL;
-<STRING>{regular_char}+		{
-								forward();
-
-								char d;
-
-								for (int i = 0; i < yyleng; i++)
-									if (yytext[i] >= 32 and yytext[i] <= 126)
-										yybuffer += yytext[i];
-									else
-										yybuffer += yylhex(yytext[i]);
+<STRING>\"					yylloc.f = yystack.back(); yystack.pop_back(); yybuffer += yytext; yylval.str = &yybuffer[0]; BEGIN(INITIAL); return T_STRING_LITERAL;
+<STRING>{regular_char}		{
+								if (yytext[0] >= 32 and yytext[0] <= 126)
+									yybuffer += yytext[0];
+								else
+									yybuffer += yyhex(yytext[0]);
 							}
 <STRING>{escape_sequence}	{
-								forward();
-
 								switch(yytext[1]) {
-									case 'b': yybuffer += yylhex('\b');
-										break;
-									case 't': yybuffer += yylhex('\t');
-										break;
-									case 'n': yybuffer += yylhex('\n');
-										break;
-									case 'r': yybuffer += yylhex('\r');
-										break;
-									case '\\': yybuffer += yylhex('\\');
-										break;
-									case '\"': yybuffer += yylhex('\"');
-										break;
 									case 'x': yybuffer += yytext;
+									case '\n':
 										break;
+									default:
+										yybuffer += yyhex(esequences[yytext[1]]);
 								}
 							}
-<STRING><<EOF>>				{
-								++yylerror;
-								std::cerr << yyfilename << ':' << yylloc.fl << ':' << yylloc.fc << ": lexical error: unterminated string literal" << std::endl;
-								return T_EOF;
-							}
+<STRING><<EOF>>				yylloc.f = yystack.back(); error("unterminated string-literal"); return T_EOF;
 
-<COMMENT>"(*"				forward(); yybuffer += yytext; ++level;
-<COMMENT>"*)"				forward(); if (--level == 0) { BEGIN(INITIAL); } else { yybuffer += yytext; }
-<COMMENT>[^\0]				forward(); yybuffer += yytext;
-<COMMENT><<EOF>>			{
-								commentmatch(); ++yylerror;
-								std::cerr << yyfilename << ':' << yylloc.fl << ':' << yylloc.fc << ": lexical error: unterminated comment" << std::endl;
-								return T_EOF;
-							}
+<COMMENT>"(*"				yystack.push_back(yylloc.f);
+<COMMENT>"*)"				yystack.pop_back(); if (yystack.empty()) BEGIN(INITIAL);
+<COMMENT>[^\0]				/* */
+<COMMENT><<EOF>>			yylloc.f = yystack.back(); error("unterminated comment"); return T_EOF;
 
-<*>.|\n						{
-								++yylerror;
-								yybuffer += yylhex(yytext[0]);
-								std::cerr << yyfilename << ':' << yylloc.ll << ':' << yylloc.lc << ": lexical error: invalid character " << yylhex(yytext[0]) << std::endl;
-								forward();
-							}
+<*>.|\n						error("invalid character " + yyhex(yytext[0]));
 
 %%
 
@@ -293,7 +250,7 @@ int main (int argc, char* argv[]) {
 		yyin = file;
 
 		for (int type = yylex(); type; type = yylex()) {
-			std::cout << yylloc.fl << ',' << yylloc.fc;
+			std::cout << yylloc.f.l << ',' << yylloc.f.c;
 
 			auto it = output.find(type);
 			std::cout << ',' << it->second;
@@ -310,5 +267,5 @@ int main (int argc, char* argv[]) {
 		}
 	}
 
-	return yylerror;
+	return yyerror;
 }
