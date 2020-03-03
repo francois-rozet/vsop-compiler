@@ -2,8 +2,8 @@
 	#define YY_USER_ACTION updateloc();
 
 	#include "define.hpp"
+	#include "tools.hpp"
 
-	#include <cstdlib>
 	#include <iostream>
 	#include <string>
 	#include <vector>
@@ -21,17 +21,6 @@
 	} yylval;
 
 	std::string yybuffer;
-
-	std::string yyhex(char c) {
-		std::string s = "\\x";
-
-		char d = c / 16;
-		s += d + (d < 10 ? '0' : 'a' - 10);
-		d = c % 16;
-		s += d + (d < 10 ? '0' : 'a' - 10);
-
-		return s;
-	}
 
 	/* token location */
 	struct loc {
@@ -87,16 +76,6 @@
 		{"true", T_TRUE},
 		{"unit", T_UNIT},
 		{"while", T_WHILE}
-	};
-
-	/* Escape sequences */
-	std::unordered_map<char, char> esequences = {
-		{'b', '\b'},
-		{'t', '\t'},
-		{'n', '\n'},
-		{'r', '\r'},
-		{'\\', '\\'},
-		{'\"', '\"'}
 	};
 
 	/* (Standard) output */
@@ -178,12 +157,12 @@ single_line_comment			"//"[^\0\n]*
 {whitespace}				/* */
 {single_line_comment}		/* */
 {type_identifier}			yylval.str = yytext; return T_TYPE_IDENTIFIER;
-{object_identifier}			yylval.str = yytext; return keywords.find(yylval.str) == keywords.end() ? T_OBJECT_IDENTIFIER : keywords[yylval.str];
+{object_identifier}			yylval.str = yytext; return keywords.find(yytext) == keywords.end() ? T_OBJECT_IDENTIFIER : keywords[yytext];
 {invalid_integer_literal}	error("invalid integer-literal " + std::string(yytext));
-{base16_literal}			yylval.num = strtol(yytext, NULL, 16); return T_INTEGER_LITERAL;
-{base10_literal}			yylval.num = strtol(yytext, NULL, 10); return T_INTEGER_LITERAL;
-\"							yystack.push_back(yylloc.f); yybuffer = yytext; BEGIN(STRING);
-"(*"						yystack.push_back(yylloc.f); yybuffer = yytext; BEGIN(COMMENT);
+{base16_literal}			yylval.num = str2num(yytext, 16); return T_INTEGER_LITERAL;
+{base10_literal}			yylval.num = str2num(yytext, 10); return T_INTEGER_LITERAL;
+\"							yystack.push_back(yylloc.f); yybuffer = ""; BEGIN(STRING);
+"(*"						yystack.push_back(yylloc.f); BEGIN(COMMENT);
 "{"							return T_LBRACE;
 "}"							return T_RBRACE;
 "("							return T_LPAR;
@@ -202,30 +181,17 @@ single_line_comment			"//"[^\0\n]*
 "<-"						return T_ASSIGN;
 "<"							return T_LOWER;
 
-<STRING>\"					yylloc.f = yystack.back(); yystack.pop_back(); yybuffer += yytext; yylval.str = &yybuffer[0]; BEGIN(INITIAL); return T_STRING_LITERAL;
-<STRING>{regular_char}		{
-								if (yytext[0] >= 32 and yytext[0] <= 126)
-									yybuffer += yytext[0];
-								else
-									yybuffer += yyhex(yytext[0]);
-							}
-<STRING>{escape_sequence}	{
-								switch(yytext[1]) {
-									case 'x': yybuffer += yytext;
-									case '\n':
-										break;
-									default:
-										yybuffer += yyhex(esequences[yytext[1]]);
-								}
-							}
-<STRING><<EOF>>				yylloc.f = yystack.back(); error("unterminated string-literal"); return T_EOF;
+<STRING>\"					yylloc.f = yystack.back(); yystack.pop_back(); yylval.str = &yybuffer[0]; BEGIN(INITIAL); return T_STRING_LITERAL;
+<STRING>{regular_char}+		yybuffer += yytext;
+<STRING>{escape_sequence}	if (yytext[1] != '\n') yybuffer += esc2char(yytext);
 
 <COMMENT>"(*"				yystack.push_back(yylloc.f);
 <COMMENT>"*)"				yystack.pop_back(); if (yystack.empty()) BEGIN(INITIAL);
 <COMMENT>[^\0]				/* */
-<COMMENT><<EOF>>			yylloc.f = yystack.back(); error("unterminated comment"); return T_EOF;
 
-<*>.|\n						error("invalid character " + yyhex(yytext[0]));
+<STRING,COMMENT><<EOF>>		yylloc.f = yystack.back(); error("unterminated encapsulated environment"); return T_EOF;
+
+<*>.|\n						error("invalid character " + char2hex(yytext[0]));
 
 %%
 
@@ -259,8 +225,22 @@ int main (int argc, char* argv[]) {
 				case T_INTEGER_LITERAL: std::cout << ',' << yylval.num;
 					break;
 				case T_TYPE_IDENTIFIER:
-				case T_OBJECT_IDENTIFIER:
-				case T_STRING_LITERAL: std::cout << ',' << yylval.str;
+				case T_OBJECT_IDENTIFIER: std::cout << ',' << yylval.str;
+					break;
+				case T_STRING_LITERAL:
+					std::cout << ',' << '\"';
+					for (char* s = yylval.str; *s; ++s)
+						switch (*s) {
+							case '\"':
+							case '\\': std::cout << char2hex(*s);
+								break;
+							default:
+								if (*s >= 32 and *s <= 126)
+									std::cout << *s;
+								else
+									std::cout << char2hex(*s);
+						}
+					std::cout << '\"';
 			}
 
 			std::cout << std::endl;
