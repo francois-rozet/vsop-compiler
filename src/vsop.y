@@ -70,9 +70,88 @@
 %token LOWER_EQUAL "<="
 %token ASSIGN "<-"
 
+%left "." "*" "/" "+" "-" "and"
+%right "^" "isnull" "not" "<-"
+%nonassoc "<" "<=" "="
+
 %%
 
-start:	INTEGER_LITERAL { $<num>$ = $1; };
+program:		class program-tail END;
+program-tail:	/* */
+				| class program-tail;
+
+class:			"class" TYPE_IDENTIFIER class-parent "{" class-body "}";
+class-parent:	/* */
+				| "extends" TYPE_IDENTIFIER;
+class-body:		/* */
+				| field class-body
+				| method class-body;
+
+field:			OBJECT_IDENTIFIER ":" type option-assign ";";
+option-assign:	/* */
+				| "<-" expr;
+
+method:			OBJECT_IDENTIFIER "(" formals ")" ":" type block;
+
+type:			TYPE_IDENTIFIER
+				| "int32"
+				| "bool"
+				| "string"
+				| "unit";
+
+formal:			OBJECT_IDENTIFIER ":" type;
+formals:		/* */
+				| formal formals-tail;
+formals-tail:	/* */
+				| "," formal formals-tail;
+
+block:			"{" expr block-tail "}";
+block-tail:		/* */
+				| ";" expr block-tail;
+
+literal:		INTEGER_LITERAL
+				| STRING_LITERAL
+				| "true"
+				| "false";
+
+args:			/* */
+				| expr args-tail;
+args-tail:		/* */
+				| "," expr args-tail;
+
+expr:			"if" expr "then" expr if-tail
+				| "while" expr "do" expr
+				| "let" OBJECT_IDENTIFIER ":" type option-assign "in" expr
+				| "not" expr
+				| "-" expr
+				| "isnull" expr
+				| "new" TYPE_IDENTIFIER
+				| literal
+				| block
+				| expr expr-tail-0
+				| OBJECT_IDENTIFIER expr-tail-1
+				| "(" expr-tail-2;
+
+if-tail:		/* */
+				| "else" expr;
+
+expr-tail-0:	"and" expr
+				| "=" expr
+				| "<" expr
+				| "<=" expr
+				| "+" expr
+				| "-" expr
+				| "*" expr
+				| "/" expr
+				| "^" expr
+				| "." OBJECT_IDENTIFIER "(" args ")";
+
+expr-tail-1:	/* */
+				| "<-" expr
+				| "(" args ")";
+
+expr-tail-2:	")"
+				| expr ")";
 
 %%
 
@@ -81,10 +160,6 @@ int yyerror(const std::string& s) {
 	std::cerr << ' ' << s << std::endl;
 
 	return ++yyerr;
-}
-
-int parse() {
-	return 0;
 }
 
 int main (int argc, char* argv[]) {
@@ -107,7 +182,7 @@ int main (int argc, char* argv[]) {
 		if (action == "-lex")
 			lex();
 		else if (action, "-parse")
-			parse();
+			yyparse();
 
 		fclose(yyin);
 	}
