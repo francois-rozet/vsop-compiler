@@ -1,3 +1,4 @@
 /bin
-*.yy.c
+*.c
+*.h
 vsopc

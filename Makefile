@@ -3,7 +3,6 @@ ALL = vsopc
 
 SRCDIR = src/
 BINDIR = bin/
-EXT = yy.c
 
 CXX = g++
 CXXFLAGS = -std=c++14 -O3
@@ -11,24 +10,23 @@ CXXFLAGS = -std=c++14 -O3
 # Executable files
 all: $(ALL)
 
-$(ALL): %: $(BINDIR)%.o
+$(ALL): %c: $(SRCDIR)%.yy.c $(SRCDIR)%.tab.c
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
-$(BINDIR)%.o: $(SRCDIR)%.$(EXT)
-	mkdir -p $(BINDIR)
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+$(SRCDIR)%.tab.c: $(SRCDIR)%.y
+	bison -o $@ -d $^
 
-$(SRCDIR)%.$(EXT): $(SRCDIR)%.lex
-	flex -o $@ $<
+$(SRCDIR)%.yy.c: $(SRCDIR)%.lex
+	flex -o $@ $^
 
 # PHONY
 .PHONY: clean dist-clean install-tools
 
 clean:
-	rm -rf $(BINDIR) $(wildcard $(SRCDIR)*.$(EXT))
+	rm -rf $(BINDIR) $(wildcard $(SRCDIR)*.c) $(wildcard $(SRCDIR)*.h)
 
 dist-clean: clean
 	rm -rf $(ALL)
 
 install-tools:
-	sudo apt install flex
+	sudo apt install flex bison
