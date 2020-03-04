@@ -15,7 +15,6 @@
 	/* bison functions */
 	int yylex(void);
 	int yyerror(const std::string& s);
-	std::string yyname(int);
 %}
 
 %locations // yylloc
@@ -28,14 +27,10 @@
 
 /* Tokens */
 
-%token-table
+%token END 0
 
-%token END 0 "end-of-file"
-
-%token <num> INTEGER_LITERAL "integer-literal"
-%token <str> STRING_LITERAL "string-literal"
-%token <str> TYPE_IDENTIFIER "type-identifier"
-%token <str> OBJECT_IDENTIFIER "object-identifier"
+%token <num> INTEGER_LITERAL
+%token <str> STRING_LITERAL TYPE_IDENTIFIER OBJECT_IDENTIFIER
 
 %token AND "and"
 %token BOOL "bool"
@@ -51,33 +46,33 @@
 %token LET "let"
 %token NEW "new"
 %token NOT "not"
-%token STRING "string"
+%token SSTRING "string"
 %token THEN "then"
 %token TRUE "true"
 %token UNIT "unit"
 %token WHILE "while"
 
-%token LBRACE "lbrace"
-%token RBRACE "rbrace"
-%token LPAR "lpar"
-%token RPAR "rpar"
-%token COLON "colon"
-%token SEMICOLON "semicolon"
-%token COMMA "comma"
-%token PLUS "plus"
-%token MINUS "minus"
-%token TIMES "times"
-%token DIV "div"
-%token POW "pow"
-%token DOT "dot"
-%token EQUAL "equal"
-%token LOWER "lower"
-%token LOWER_EQUAL "lower-equal"
-%token ASSIGN "assign"
+%token LBRACE "{"
+%token RBRACE "}"
+%token LPAR "("
+%token RPAR ")"
+%token COLON ":"
+%token SEMICOLON ";"
+%token COMMA ","
+%token PLUS "+"
+%token MINUS "-"
+%token TIMES "*"
+%token DIV "/"
+%token POW "^"
+%token DOT "."
+%token EQUAL "="
+%token LOWER "<"
+%token LOWER_EQUAL "<="
+%token ASSIGN "<-"
 
 %%
 
-Exp	:	INTEGER_LITERAL { $<num>$ = $1; };
+start:	INTEGER_LITERAL { $<num>$ = $1; };
 
 %%
 
@@ -86,11 +81,6 @@ int yyerror(const std::string& s) {
 	std::cerr << ' ' << s << std::endl;
 
 	return ++yyerr;
-}
-
-std::string yyname(int type) {
-	std::string s = yytname[yytranslate[type]];
-	return s.substr(1, s.length() - 2);
 }
 
 int parse() {

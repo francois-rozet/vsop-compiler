@@ -43,7 +43,6 @@
 	/* bison global functions */
 	extern int yylex();
 	extern int yyerror(const std::string&);
-	extern std::string yyname(int);
 
 	/* keywords */
 	std::unordered_map<std::string, int> keywords = {
@@ -61,7 +60,7 @@
 		{"let", LET},
 		{"new", NEW},
 		{"not", NOT},
-		{"string", STRING},
+		{"string", SSTRING},
 		{"then", THEN},
 		{"true", TRUE},
 		{"unit", UNIT},
@@ -141,32 +140,68 @@ single_line_comment			"//"[^\0\n]*
 
 %%
 
+std::string format(const char* s) {
+	std::string str;
+
+	for (; *s; ++s)
+		switch (*s) {
+			case '\"':
+			case '\\': str += char2hex(*s); break;
+			default:
+				if (*s >= 32 and *s <= 126)
+					str += *s;
+				else
+					str += char2hex(*s);
+		}
+
+	return "\"" + str + "\"";
+}
+
 int lex() {
 	for (int type = yylex(); type; type = yylex()) {
-		std::cout << yylloc.first_line << ',' << yylloc.first_column;
-
-		std::cout << ',' << yyname(type);
+		std::cout << yylloc.first_line << ',' << yylloc.first_column << ',';
 
 		switch (type) {
-			case INTEGER_LITERAL: std::cout << ',' << yylval.num;
-				break;
-			case TYPE_IDENTIFIER:
-			case OBJECT_IDENTIFIER: std::cout << ',' << yylval.str;
-				break;
-			case STRING_LITERAL:
-				std::cout << ',' << '\"';
-				for (char* s = yylval.str; *s; ++s)
-					switch (*s) {
-						case '\"':
-						case '\\': std::cout << char2hex(*s);
-							break;
-						default:
-							if (*s >= 32 and *s <= 126)
-								std::cout << *s;
-							else
-								std::cout << char2hex(*s);
-					}
-				std::cout << '\"';
+			case INTEGER_LITERAL:	std::cout << "integer-literal," << yylval.num;			break;
+			case STRING_LITERAL:	std::cout << "string-literal," << format(yylval.str);	break;
+			case TYPE_IDENTIFIER:	std::cout << "type-identifier," << yylval.str;			break;
+			case OBJECT_IDENTIFIER:	std::cout << "object-identifier," << yylval.str;		break;
+			case AND:				std::cout << "and";										break;
+			case BOOL:				std::cout << "bool";									break;
+			case CLASS:				std::cout << "class";									break;
+			case DO:				std::cout << "do";										break;
+			case ELSE:				std::cout << "else";									break;
+			case EXTENDS:			std::cout << "extends";									break;
+			case FALSE:				std::cout << "false";									break;
+			case IF:				std::cout << "if";										break;
+			case IN:				std::cout << "in";										break;
+			case INT32:				std::cout << "int32";									break;
+			case ISNULL:			std::cout << "isnull";									break;
+			case LET:				std::cout << "let";										break;
+			case NEW:				std::cout << "new";										break;
+			case NOT:				std::cout << "not";										break;
+			case SSTRING:			std::cout << "string";									break;
+			case THEN:				std::cout << "then";									break;
+			case TRUE:				std::cout << "true";									break;
+			case UNIT:				std::cout << "unit";									break;
+			case WHILE:				std::cout << "while";									break;
+			case LBRACE:			std::cout << "lbrace";									break;
+			case RBRACE:			std::cout << "rbrace";									break;
+			case LPAR:				std::cout << "lpar";									break;
+			case RPAR:				std::cout << "rpar";									break;
+			case COLON:				std::cout << "colon";									break;
+			case SEMICOLON:			std::cout << "semicolon";								break;
+			case COMMA:				std::cout << "comma";									break;
+			case PLUS:				std::cout << "plus";									break;
+			case MINUS:				std::cout << "minus";									break;
+			case TIMES:				std::cout << "times";									break;
+			case DIV:				std::cout << "div";										break;
+			case POW:				std::cout << "pow";										break;
+			case DOT:				std::cout << "dot";										break;
+			case EQUAL:				std::cout << "equal";									break;
+			case LOWER:				std::cout << "lower";									break;
+			case LOWER_EQUAL:		std::cout << "lower-equal";								break;
+			case ASSIGN:			std::cout << "assign";									break;
 		}
 
 		std::cout << std::endl;
