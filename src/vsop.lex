@@ -2,10 +2,11 @@
 	#define YY_USER_ACTION yyupdate();
 
 	#include "tools.hpp"
+	#include "ast.hpp"
 	#include "vsop.tab.h"
 
 	#include <iostream>
-	#include <string>
+	#include <string.h>
 	#include <vector>
 	#include <unordered_map>
 
@@ -101,32 +102,32 @@ single_line_comment			"//"[^\0\n]*
 
 {whitespace}				/* */
 {single_line_comment}		/* */
-{type_identifier}			yylval.str = yytext; return TYPE_IDENTIFIER;
-{object_identifier}			yylval.str = yytext; return keywords.find(yytext) == keywords.end() ? OBJECT_IDENTIFIER : keywords[yytext];
+{type_identifier}			yylval.id = strdup(yytext); return TYPE_IDENTIFIER;
+{object_identifier}			yylval.id = strdup(yytext); return keywords.find(yytext) == keywords.end() ? OBJECT_IDENTIFIER : keywords[yytext];
 {invalid_integer_literal}	yyerror("lexical error, invalid integer-literal " + std::string(yytext));
 {base16_literal}			yylval.num = str2num(yytext, 16); return INTEGER_LITERAL;
 {base10_literal}			yylval.num = str2num(yytext, 10); return INTEGER_LITERAL;
 \"							yypush(); yybuffer = ""; BEGIN(STRING);
 "(*"						yypush(); BEGIN(COMMENT);
-"{"							return LBRACE;
-"}"							return RBRACE;
-"("							return LPAR;
-")"							return RPAR;
-":"							return COLON;
-";"							return SEMICOLON;
-","							return COMMA;
-"+"							return PLUS;
-"-"							return MINUS;
-"*"							return TIMES;
-"/"							return DIV;
-"^"							return POW;
-"."							return DOT;
-"="							return EQUAL;
-"<="						return LOWER_EQUAL;
-"<-"						return ASSIGN;
-"<"							return LOWER;
+"{"							yylval.id = strdup("lbrace"); return LBRACE;
+"}"							yylval.id = strdup("rbrace"); return RBRACE;
+"("							yylval.id = strdup("lpar"); return LPAR;
+")"							yylval.id = strdup("rpar"); return RPAR;
+":"							yylval.id = strdup("colon"); return COLON;
+";"							yylval.id = strdup("semicolon"); return SEMICOLON;
+","							yylval.id = strdup("comma"); return COMMA;
+"+"							yylval.id = strdup("plus"); return PLUS;
+"-"							yylval.id = strdup("minus"); return MINUS;
+"*"							yylval.id = strdup("times"); return TIMES;
+"/"							yylval.id = strdup("div"); return DIV;
+"^"							yylval.id = strdup("pow"); return POW;
+"."							yylval.id = strdup("dot"); return DOT;
+"="							yylval.id = strdup("equal"); return EQUAL;
+"<="						yylval.id = strdup("lower-equal"); return LOWER_EQUAL;
+"<-"						yylval.id = strdup("assign"); return ASSIGN;
+"<"							yylval.id = strdup("lower"); return LOWER;
 
-<STRING>\"					yylloc = yypop(); yylval.str = &yybuffer[0]; BEGIN(INITIAL); return STRING_LITERAL;
+<STRING>\"					yylloc = yypop(); yylval.node = new String(yybuffer); BEGIN(INITIAL); return STRING_LITERAL;
 <STRING>{regular_char}+		yybuffer += yytext;
 <STRING>{escape_sequence}	if (yytext[1] != '\n') yybuffer += esc2char(yytext);
 
@@ -140,68 +141,16 @@ single_line_comment			"//"[^\0\n]*
 
 %%
 
-std::string format(const char* s) {
-	std::string str;
-
-	for (; *s; ++s)
-		switch (*s) {
-			case '\"':
-			case '\\': str += char2hex(*s); break;
-			default:
-				if (*s >= 32 and *s <= 126)
-					str += *s;
-				else
-					str += char2hex(*s);
-		}
-
-	return "\"" + str + "\"";
-}
-
 int lex() {
 	for (int type = yylex(); type; type = yylex()) {
 		std::cout << yylloc.first_line << ',' << yylloc.first_column << ',';
 
 		switch (type) {
-			case INTEGER_LITERAL:	std::cout << "integer-literal," << yylval.num;			break;
-			case STRING_LITERAL:	std::cout << "string-literal," << format(yylval.str);	break;
-			case TYPE_IDENTIFIER:	std::cout << "type-identifier," << yylval.str;			break;
-			case OBJECT_IDENTIFIER:	std::cout << "object-identifier," << yylval.str;		break;
-			case AND:				std::cout << "and";										break;
-			case BOOL:				std::cout << "bool";									break;
-			case CLASS:				std::cout << "class";									break;
-			case DO:				std::cout << "do";										break;
-			case ELSE:				std::cout << "else";									break;
-			case EXTENDS:			std::cout << "extends";									break;
-			case FALSE:				std::cout << "false";									break;
-			case IF:				std::cout << "if";										break;
-			case IN:				std::cout << "in";										break;
-			case INT32:				std::cout << "int32";									break;
-			case ISNULL:			std::cout << "isnull";									break;
-			case LET:				std::cout << "let";										break;
-			case NEW:				std::cout << "new";										break;
-			case NOT:				std::cout << "not";										break;
-			case SSTRING:			std::cout << "string";									break;
-			case THEN:				std::cout << "then";									break;
-			case TRUE:				std::cout << "true";									break;
-			case UNIT:				std::cout << "unit";									break;
-			case WHILE:				std::cout << "while";									break;
-			case LBRACE:			std::cout << "lbrace";									break;
-			case RBRACE:			std::cout << "rbrace";									break;
-			case LPAR:				std::cout << "lpar";									break;
-			case RPAR:				std::cout << "rpar";									break;
-			case COLON:				std::cout << "colon";									break;
-			case SEMICOLON:			std::cout << "semicolon";								break;
-			case COMMA:				std::cout << "comma";									break;
-			case PLUS:				std::cout << "plus";									break;
-			case MINUS:				std::cout << "minus";									break;
-			case TIMES:				std::cout << "times";									break;
-			case DIV:				std::cout << "div";										break;
-			case POW:				std::cout << "pow";										break;
-			case DOT:				std::cout << "dot";										break;
-			case EQUAL:				std::cout << "equal";									break;
-			case LOWER:				std::cout << "lower";									break;
-			case LOWER_EQUAL:		std::cout << "lower-equal";								break;
-			case ASSIGN:			std::cout << "assign";									break;
+			case INTEGER_LITERAL:	std::cout << "integer-literal," << yylval.num; break;
+			case STRING_LITERAL:	std::cout << "string-literal," << yylval.node->to_string(); break;
+			case TYPE_IDENTIFIER:	std::cout << "type-identifier," << yylval.id; break;
+			case OBJECT_IDENTIFIER:	std::cout << "object-identifier," << yylval.id; break;
+			default:				std::cout << yylval.id;
 		}
 
 		std::cout << std::endl;

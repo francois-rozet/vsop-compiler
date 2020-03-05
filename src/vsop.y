@@ -1,6 +1,8 @@
 %{
+	#include "ast.hpp"
+
 	#include <iostream>
-	#include <string>
+	#include <string.h>
 
 	/* flex global variables */
 	extern FILE* yyin;
@@ -12,6 +14,8 @@
 	char* yyfilename;
 	int yyerr = 0;
 
+	Node* root;
+
 	/* bison functions */
 	int yylex(void);
 	int yyerror(const std::string& s);
@@ -21,8 +25,13 @@
 
 %union // yylval
 {
-    int num;
-    char* str;
+	int num;
+	char* id;
+	Node* node;
+	Args* args;
+	Declaration* decl;
+	List<Class>* pgm;
+	List<Formal>* forms;
 }
 
 /* Tokens */
@@ -30,68 +39,94 @@
 %token END 0
 
 %token <num> INTEGER_LITERAL
-%token <str> STRING_LITERAL TYPE_IDENTIFIER OBJECT_IDENTIFIER
+%token <node> STRING_LITERAL
+%token <id> TYPE_IDENTIFIER OBJECT_IDENTIFIER
 
-%token AND "and"
-%token BOOL "bool"
-%token CLASS "class"
-%token DO "do"
-%token ELSE "else"
-%token EXTENDS "extends"
-%token FALSE "false"
-%token IF "if"
-%token IN "in"
-%token INT32 "int32"
-%token ISNULL "isnull"
-%token LET "let"
-%token NEW "new"
-%token NOT "not"
-%token SSTRING "string"
-%token THEN "then"
-%token TRUE "true"
-%token UNIT "unit"
-%token WHILE "while"
+%token <id> AND "and"
+%token <id> BOOL "bool"
+%token <id> CLASS "class"
+%token <id> DO "do"
+%token <id> ELSE "else"
+%token <id> EXTENDS "extends"
+%token <id> FALSE "false"
+%token <id> IF "if"
+%token <id> IN "in"
+%token <id> INT32 "int32"
+%token <id> ISNULL "isnull"
+%token <id> LET "let"
+%token <id> NEW "new"
+%token <id> NOT "not"
+%token <id> SSTRING "string"
+%token <id> THEN "then"
+%token <id> TRUE "true"
+%token <id> UNIT "unit"
+%token <id> WHILE "while"
 
-%token LBRACE "{"
-%token RBRACE "}"
-%token LPAR "("
-%token RPAR ")"
-%token COLON ":"
-%token SEMICOLON ";"
-%token COMMA ","
-%token PLUS "+"
-%token MINUS "-"
-%token TIMES "*"
-%token DIV "/"
-%token POW "^"
-%token DOT "."
-%token EQUAL "="
-%token LOWER "<"
-%token LOWER_EQUAL "<="
-%token ASSIGN "<-"
+%token <id> LBRACE "{"
+%token <id> RBRACE "}"
+%token <id> LPAR "("
+%token <id> RPAR ")"
+%token <id> COLON ":"
+%token <id> SEMICOLON ";"
+%token <id> COMMA ","
+%token <id> PLUS "+"
+%token <id> MINUS "-"
+%token <id> TIMES "*"
+%token <id> DIV "/"
+%token <id> POW "^"
+%token <id> DOT "."
+%token <id> EQUAL "="
+%token <id> LOWER "<"
+%token <id> LOWER_EQUAL "<="
+%token <id> ASSIGN "<-"
 
-%left "." "*" "/" "+" "-" "and"
-%right "^" "isnull" "not" "<-"
+%nterm <id> type class-parent
+%nterm <node> class field method formal expr if while let unary binary call literal assign-tail
+%nterm <args> block block-tail args args-tail
+%nterm <decl> class-body
+%nterm <pgm> program program-tail
+%nterm <forms> formals formals-tail
+
+%precedence "if" "then" "while" "do" "let" "in"
+%precedence "else"
+
+%right "<-"
+%left "and"
+%right "not"
 %nonassoc "<" "<=" "="
+%left "+" "-"
+%left "*" "/"
+%right UMINUS "isnull"
+%right "^"
+%left "."
 
 %%
 
-program:		class program-tail END;
+program:		class program-tail
+				{ $2->push($1); $$ = $2; root = $$; };
 program-tail:	/* */
-				| class program-tail;
+				{ $$ = new List<Class>(); }
+				| class program-tail
+				{ $2->push($1); $$ = $2; };
 
-class:			"class" TYPE_IDENTIFIER class-parent "{" class-body "}";
+class:			"class" TYPE_IDENTIFIER class-parent "{" class-body "}"
+				{ $$ = new Class($2, $3, $5->fields, $5->methods); };
 class-parent:	/* */
-				| "extends" TYPE_IDENTIFIER;
+				{ $$ = strdup("Object"); }
+				| "extends" TYPE_IDENTIFIER
+				{ $$ = $2; };
 class-body:		/* */
+				{ $$ = new Declaration(); }
 				| field class-body
-				| method class-body;
+				{ $2->fields.push($1); $$ = $2; }
+				| method class-body
+				{ $2->methods.push($1); $$ = $2; };
 
-field:			OBJECT_IDENTIFIER ":" type option-assign ";";
-option-assign:	/* */
-				| "<-" expr;
+field:			OBJECT_IDENTIFIER ":" type assign-tail ";"
+				{ $$ = new Field($1, $3, $4); };
 
-method:			OBJECT_IDENTIFIER "(" formals ")" ":" type block;
+method:			OBJECT_IDENTIFIER "(" formals ")" ":" type block
+				{ $$ = new Method($1, *$3, $6, Block(*$7)); };
 
 type:			TYPE_IDENTIFIER
 				| "int32"
@@ -99,59 +134,107 @@ type:			TYPE_IDENTIFIER
 				| "string"
 				| "unit";
 
-formal:			OBJECT_IDENTIFIER ":" type;
+formal:			OBJECT_IDENTIFIER ":" type
+				{ $$ = new Formal($1, $3); };
 formals:		/* */
-				| formal formals-tail;
+				{ $$ = new List<Formal>(); }
+				| formal formals-tail
+				{ $2->push($1); $$ = $2; };
 formals-tail:	/* */
-				| "," formal formals-tail;
+				{ $$ = new List<Formal>(); }
+				| "," formal formals-tail
+				{ $3->push($2); $$ = $3; };
 
-block:			"{" expr block-tail "}";
-block-tail:		/* */
-				| ";" expr block-tail;
+expr:			if
+				| while
+				| let
+				| unary
+				| binary
+				| call
+				| literal
+				| "new" TYPE_IDENTIFIER
+				{ $$ = new New($2); }
+				| OBJECT_IDENTIFIER
+				{ $$ = new Identifier($1); }
+				| OBJECT_IDENTIFIER "<-" expr
+				{ $$ = new Assign($1, $3); }
+				| "(" ")"
+				{ $$ = new Unit(); }
+				| "(" expr ")"
+				{ $$ = $2; }
+				| block
+				{ $$ = new Block(*$1); };
+
+if:				"if" expr "then" expr
+				{ $$ = new If($2, $4, NULL); }
+				| "if" expr "then" expr "else" expr
+				{ $$ = new If($2, $4, $6); };
+
+while:			"while" expr "do" expr
+				{ $$ = new While($2, $4); };
+
+let:			"let" OBJECT_IDENTIFIER ":" type assign-tail "in" expr
+				{ $$ = new Let($2, $4, $5, $7); };
+
+unary:			"not" expr
+				{ $$ = new Unary(Unary::NOT, $2); }
+				| "-" expr %prec UMINUS
+				{ $$ = new Unary(Unary::MINUS, $2); }
+				| "isnull" expr
+				{ $$ = new Unary(Unary::ISNULL, $2); };
+
+binary:			expr "and" expr
+				{ $$ = new Binary(Binary::AND, $1, $3); }
+				| expr "=" expr
+				{ $$ = new Binary(Binary::EQUAL, $1, $3); }
+				| expr "<" expr
+				{ $$ = new Binary(Binary::LOWER, $1, $3); }
+				| expr "<=" expr
+				{ $$ = new Binary(Binary::LOWER_EQUAL, $1, $3); }
+				| expr "+" expr
+				{ $$ = new Binary(Binary::PLUS, $1, $3); }
+				| expr "-" expr
+				{ $$ = new Binary(Binary::MINUS, $1, $3); }
+				| expr "*" expr
+				{ $$ = new Binary(Binary::TIMES, $1, $3); }
+				| expr "/" expr
+				{ $$ = new Binary(Binary::DIV, $1, $3); }
+				| expr "^" expr
+				{ $$ = new Binary(Binary::POW, $1, $3); };
+
+call:			expr "." OBJECT_IDENTIFIER "(" args ")"
+				{ $$ = new Call($1, $3, *$5); }
+				| OBJECT_IDENTIFIER "(" args ")"
+				{ $$ = new Call(NULL, $1, *$3); };
 
 literal:		INTEGER_LITERAL
+				{ $$ = new Integer($1); }
 				| STRING_LITERAL
 				| "true"
-				| "false";
+				{ $$ = new Boolean(true); }
+				| "false"
+				{ $$ = new Boolean(false); };
+
+assign-tail:	/* */
+				{ $$ = NULL; }
+				| "<-" expr
+				{ $$ = $2; };
+
+block:			"{" expr block-tail "}"
+				{ $3->push($2); $$ = $3; };
+block-tail:		/* */
+				{ $$ = new Args(); }
+				| ";" expr block-tail
+				{ $3->push($2); $$ = $3; };
 
 args:			/* */
-				| expr args-tail;
+				{ $$ = new Args(); }
+				| expr args-tail
+				{ $2->push($1); $$ = $2; };
 args-tail:		/* */
-				| "," expr args-tail;
-
-expr:			"if" expr "then" expr if-tail
-				| "while" expr "do" expr
-				| "let" OBJECT_IDENTIFIER ":" type option-assign "in" expr
-				| "not" expr
-				| "-" expr
-				| "isnull" expr
-				| "new" TYPE_IDENTIFIER
-				| literal
-				| block
-				| expr expr-tail-0
-				| OBJECT_IDENTIFIER expr-tail-1
-				| "(" expr-tail-2;
-
-if-tail:		/* */
-				| "else" expr;
-
-expr-tail-0:	"and" expr
-				| "=" expr
-				| "<" expr
-				| "<=" expr
-				| "+" expr
-				| "-" expr
-				| "*" expr
-				| "/" expr
-				| "^" expr
-				| "." OBJECT_IDENTIFIER "(" args ")";
-
-expr-tail-1:	/* */
-				| "<-" expr
-				| "(" args ")";
-
-expr-tail-2:	")"
-				| expr ")";
+				{ $$ = new Args(); }
+				| "," expr args-tail
+				{ $3->push($2); $$ = $3; };
 
 %%
 
@@ -181,8 +264,12 @@ int main (int argc, char* argv[]) {
 
 		if (action == "-lex")
 			lex();
-		else if (action, "-parse")
+		else if (action, "-parse") {
 			yyparse();
+
+			if (not yyerr)
+				std::cout << root->to_string() << std::endl;
+		}
 
 		fclose(yyin);
 	}
