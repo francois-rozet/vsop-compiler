@@ -1,27 +1,11 @@
-%{
-	#include "ast.hpp"
-
+%code top {
 	#include <iostream>
 	#include <string.h>
+}
 
-	/* flex global variables */
-	extern FILE* yyin;
-
-	/* flex global functions */
-	extern int lex();
-
-	/* bison variables */
-	char* yyfilename;
-	int yyerr = 0;
-
-	Node* root;
-
-	/* bison functions */
-	int yylex(void);
-	int yyerror(const std::string& s);
-%}
-
-%locations // yylloc
+%code requires {
+	#include "ast.hpp"
+}
 
 %union // yylval
 {
@@ -33,6 +17,36 @@
 	List<Class>* pgm;
 	List<Formal>* forms;
 }
+
+%code requires {
+	#define YYLTYPE yyltype
+
+	typedef struct yyltype {
+		int first_line = 1;
+		int first_column = 1;
+		int last_line = 1;
+		int last_column = 1;
+		char* filename = NULL;
+	} yyltype;
+}
+
+%locations // yylloc
+
+%{
+	/* flex global variables */
+	extern FILE* yyin;
+
+	/* flex global functions */
+	extern int lex();
+
+	/* bison functions */
+	int yylex(void);
+	void yyrelocate(const YYLTYPE&);
+	void yyerror(const std::string&);
+
+	/* AST */
+	Node* root;
+%}
 
 /* Tokens */
 
@@ -238,11 +252,14 @@ args-tail:		/* */
 
 %%
 
-int yyerror(const std::string& s) {
-	std::cerr << yyfilename << ':' << yylloc.first_line << ':' << yylloc.first_column << ':';
-	std::cerr << ' ' << s << std::endl;
+void yyrelocate(const YYLTYPE& loc) {
+	yylloc.first_line = loc.first_line;
+	yylloc.first_column = loc.first_column;
+}
 
-	return ++yyerr;
+void yyerror(const std::string& msg) {
+	std::cerr << yylloc.filename << ':' << yylloc.first_line << ':' << yylloc.first_column << ':';
+	std::cerr << ' ' << msg << std::endl;
 }
 
 int main (int argc, char* argv[]) {
@@ -251,28 +268,28 @@ int main (int argc, char* argv[]) {
 	else if (argc < 3) {
 		std::cerr << "vsopc " << argv[1] << ": error: no input file" << std::endl;
 		return 1;
-	} else {
-		yyfilename = argv[2];
-		yyin = fopen(yyfilename, "r");
-
-		if (not yyin) {
-			std::cerr << "vsopc: fatal-error: " << yyfilename << ": No such file or directory" << std::endl;
-			return -1;
-		}
-
-		std::string action = argv[1];
-
-		if (action == "-lex")
-			lex();
-		else if (action, "-parse") {
-			yyparse();
-
-			if (not yyerr)
-				std::cout << root->to_string() << std::endl;
-		}
-
-		fclose(yyin);
 	}
 
-	return yyerr;
+	yylloc.filename = argv[2];
+	yyin = fopen(yylloc.filename, "r");
+
+	if (not yyin) {
+		std::cerr << "vsopc: fatal-error: " << yylloc.filename << ": No such file or directory" << std::endl;
+		return 1;
+	}
+
+	std::string action = argv[1];
+
+	if (action == "-lex")
+		lex();
+	else if (action, "-parse") {
+		yyparse();
+
+		if (not yynerrs)
+			std::cout << root->to_string() << std::endl;
+	}
+
+	fclose(yyin);
+
+	return yynerrs;
 }

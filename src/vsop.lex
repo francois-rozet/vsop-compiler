@@ -32,18 +32,15 @@
 	}
 
 	YYLTYPE yypop() {
-		YYLTYPE loc = yystack.back();
+		YYLTYPE back = yystack.back();
 		yystack.pop_back();
-
-		loc.last_line = yylloc.last_line;
-		loc.last_column = yylloc.last_column;
-
-		return loc;
+		return back;
 	}
 
 	/* bison global functions */
 	extern int yylex();
-	extern int yyerror(const std::string&);
+	extern void yyrelocate(const YYLTYPE&);
+	extern void yyerror(const std::string&);
 
 	/* keywords */
 	std::unordered_map<std::string, int> keywords = {
@@ -127,7 +124,7 @@ single_line_comment			"//"[^\0\n]*
 "<-"						yylval.id = strdup("assign"); return ASSIGN;
 "<"							yylval.id = strdup("lower"); return LOWER;
 
-<STRING>\"					yylloc = yypop(); yylval.node = new String(yybuffer); BEGIN(INITIAL); return STRING_LITERAL;
+<STRING>\"					yyrelocate(yypop()); yylval.node = new String(yybuffer); BEGIN(INITIAL); return STRING_LITERAL;
 <STRING>{regular_char}+		yybuffer += yytext;
 <STRING>{escape_sequence}	if (yytext[1] != '\n') yybuffer += esc2char(yytext);
 
@@ -135,7 +132,7 @@ single_line_comment			"//"[^\0\n]*
 <COMMENT>"*)"				yypop(); if (yystack.empty()) BEGIN(INITIAL);
 <COMMENT>[^\0]				/* */
 
-<STRING,COMMENT><<EOF>>		yylloc = yypop(); yyerror("lexical error, unterminated encapsulated environment"); return END;
+<STRING,COMMENT><<EOF>>		yyrelocate(yypop()); yyerror("lexical error, unterminated encapsulated environment"); return END;
 
 <*>.|\n						yyerror("lexical error, invalid character " + char2hex(yytext[0]));
 
