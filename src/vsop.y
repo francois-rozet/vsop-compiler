@@ -39,22 +39,28 @@
 	/* flex global functions */
 	extern int lex();
 
+	/* bison variables */
+	int yyerrs = 0;
+
 	/* bison functions */
 	int yylex(void);
 	void yyrelocate(const YYLTYPE&);
-	void yyerror(const std::string&);
+	int yyerror(const std::string&);
 
 	/* AST */
 	Node* root;
 %}
 
+%define parse.error verbose
+
 /* Tokens */
 
-%token END 0
+%token END 0 "end-of-file"
 
-%token <num> INTEGER_LITERAL
-%token <node> STRING_LITERAL
-%token <id> TYPE_IDENTIFIER OBJECT_IDENTIFIER
+%token <num> INTEGER_LITERAL "integer-literal"
+%token <node> STRING_LITERAL "string-literal"
+%token <id> TYPE_IDENTIFIER "type-identifier"
+%token <id> OBJECT_IDENTIFIER "object-identifier"
 
 %token <id> AND "and"
 %token <id> BOOL "bool"
@@ -94,12 +100,12 @@
 %token <id> LOWER_EQUAL "<="
 %token <id> ASSIGN "<-"
 
-%nterm <id> type class-parent
-%nterm <node> class field method formal expr if while let unary binary call literal assign-tail
-%nterm <args> block block-tail args args-tail
-%nterm <decl> class-body
-%nterm <pgm> program program-tail
-%nterm <forms> formals formals-tail
+%nterm <id> type class-parent type_id object_id
+%nterm <node> class field method formal expr if while let unary binary call literal
+%nterm <args> block block-aux args args-aux
+%nterm <decl> class-aux
+%nterm <pgm> program
+%nterm <forms> formals formals-aux
 
 %precedence "if" "then" "while" "do" "let" "in"
 %precedence "else"
@@ -116,48 +122,76 @@
 
 %%
 
-program:		class program-tail
-				{ $2->push($1); $$ = $2; root = $$; };
-program-tail:	/* */
-				{ $$ = new List<Class>(); }
-				| class program-tail
-				{ $2->push($1); $$ = $2; };
+program:		class
+				{ $$ = new List<Class>(); $$->push($1); root = $$; }
+				| class program
+				{ $2->push($1); $$ = $2; }
+				| error
+				{ $$ = new List<Class>(); root = $$; yyerrok; }
+				| error program
+				{ $$ = $2; yyerrok; };
 
-class:			"class" TYPE_IDENTIFIER class-parent "{" class-body "}"
+class:			"class" type_id class-parent "{" class-aux
 				{ $$ = new Class($2, $3, $5->fields, $5->methods); };
+
 class-parent:	/* */
 				{ $$ = strdup("Object"); }
-				| "extends" TYPE_IDENTIFIER
+				| "extends" type_id
 				{ $$ = $2; };
-class-body:		/* */
+
+class-aux:		"}"
 				{ $$ = new Declaration(); }
-				| field class-body
+				| field class-aux
 				{ $2->fields.push($1); $$ = $2; }
-				| method class-body
-				{ $2->methods.push($1); $$ = $2; };
+				| method class-aux
+				{ $2->methods.push($1); $$ = $2; }
+				| error "}"
+				{ $$ = new Declaration(); yyerrok; };
 
-field:			OBJECT_IDENTIFIER ":" type assign-tail ";"
-				{ $$ = new Field($1, $3, $4); };
+field:			object_id ":" type ";"
+				{ $$ = new Field($1, $3, NULL); }
+				| object_id ":" type "<-" expr ";"
+				{ $$ = new Field($1, $3, $5); };
 
-method:			OBJECT_IDENTIFIER "(" formals ")" ":" type block
-				{ $$ = new Method($1, *$3, $6, Block(*$7)); };
+method:			object_id formals ":" type block
+				{ $$ = new Method($1, *$2, $4, Block(*$5)); };
 
-type:			TYPE_IDENTIFIER
+object_id:		OBJECT_IDENTIFIER
+				| TYPE_IDENTIFIER
+				{ $$ = strdup($1); *$$ += 'a' - 'A'; yyerror("syntax error, unexpected type-identifier " + std::string($1) + ", replaced by " + std::string($$)); };
+
+type_id:		TYPE_IDENTIFIER
+				| OBJECT_IDENTIFIER
+				{ $$ = strdup($1); *$$ -= 'a' - 'A'; yyerror("syntax error, unexpected object-identifier " + std::string($1) + ", replaced by " + std::string($$)); };
+
+type:			type_id
 				| "int32"
 				| "bool"
 				| "string"
 				| "unit";
 
-formal:			OBJECT_IDENTIFIER ":" type
+formal:			object_id ":" type
 				{ $$ = new Formal($1, $3); };
-formals:		/* */
+
+formals:		"(" ")"
 				{ $$ = new List<Formal>(); }
-				| formal formals-tail
-				{ $2->push($1); $$ = $2; };
-formals-tail:	/* */
-				{ $$ = new List<Formal>(); }
-				| "," formal formals-tail
-				{ $3->push($2); $$ = $3; };
+				| "(" formals-aux
+				{ $$ = $2; };
+formals-aux:	formal ")"
+				{ $$ = new List<Formal>(); $$->push($1); }
+				| formal "," formals-aux
+				{ $3->push($1); $$ = $3; }
+				| error ")"
+				{ $$ = new List<Formal>(); yyerrok; };
+
+block:			"{" block-aux
+				{ $$ = $2; };
+block-aux:		expr "}"
+				{ $$ = new Args(); $$->push($1); }
+				| expr ";" block-aux
+				{ $3->push($1); $$ = $3; }
+				| error "}"
+				{ $$ = new Args(); yyerrok; };
 
 expr:			if
 				| while
@@ -166,11 +200,11 @@ expr:			if
 				| binary
 				| call
 				| literal
-				| "new" TYPE_IDENTIFIER
+				| "new" type_id
 				{ $$ = new New($2); }
-				| OBJECT_IDENTIFIER
+				| object_id
 				{ $$ = new Identifier($1); }
-				| OBJECT_IDENTIFIER "<-" expr
+				| object_id "<-" expr
 				{ $$ = new Assign($1, $3); }
 				| "(" ")"
 				{ $$ = new Unit(); }
@@ -187,8 +221,10 @@ if:				"if" expr "then" expr
 while:			"while" expr "do" expr
 				{ $$ = new While($2, $4); };
 
-let:			"let" OBJECT_IDENTIFIER ":" type assign-tail "in" expr
-				{ $$ = new Let($2, $4, $5, $7); };
+let:			"let" object_id ":" type "in" expr
+				{ $$ = new Let($2, $4, NULL, $6); }
+				| "let" object_id ":" type "<-" expr "in" expr
+				{ $$ = new Let($2, $4, $6, $8); };
 
 unary:			"not" expr
 				{ $$ = new Unary(Unary::NOT, $2); }
@@ -216,11 +252,6 @@ binary:			expr "and" expr
 				| expr "^" expr
 				{ $$ = new Binary(Binary::POW, $1, $3); };
 
-call:			expr "." OBJECT_IDENTIFIER "(" args ")"
-				{ $$ = new Call($1, $3, *$5); }
-				| OBJECT_IDENTIFIER "(" args ")"
-				{ $$ = new Call(NULL, $1, *$3); };
-
 literal:		INTEGER_LITERAL
 				{ $$ = new Integer($1); }
 				| STRING_LITERAL
@@ -229,26 +260,21 @@ literal:		INTEGER_LITERAL
 				| "false"
 				{ $$ = new Boolean(false); };
 
-assign-tail:	/* */
-				{ $$ = NULL; }
-				| "<-" expr
+call:			expr "." object_id args
+				{ $$ = new Call($1, $3, *$4); }
+				| object_id args
+				{ $$ = new Call(NULL, $1, *$2); };
+
+args:			"(" ")"
+				{ $$ = new Args(); }
+				| "(" args-aux
 				{ $$ = $2; };
-
-block:			"{" expr block-tail "}"
-				{ $3->push($2); $$ = $3; };
-block-tail:		/* */
-				{ $$ = new Args(); }
-				| ";" expr block-tail
-				{ $3->push($2); $$ = $3; };
-
-args:			/* */
-				{ $$ = new Args(); }
-				| expr args-tail
-				{ $2->push($1); $$ = $2; };
-args-tail:		/* */
-				{ $$ = new Args(); }
-				| "," expr args-tail
-				{ $3->push($2); $$ = $3; };
+args-aux:		expr ")"
+				{ $$ = new Args(); $$->push($1); }
+				| expr "," args-aux
+				{ $3->push($1); $$ = $3; }
+				| error ")"
+				{ $$ = new Args(); yyerrok; };
 
 %%
 
@@ -257,9 +283,11 @@ void yyrelocate(const YYLTYPE& loc) {
 	yylloc.first_column = loc.first_column;
 }
 
-void yyerror(const std::string& msg) {
+int yyerror(const std::string& msg) {
 	std::cerr << yylloc.filename << ':' << yylloc.first_line << ':' << yylloc.first_column << ':';
 	std::cerr << ' ' << msg << std::endl;
+
+	return ++yyerrs;
 }
 
 int main (int argc, char* argv[]) {
@@ -285,11 +313,11 @@ int main (int argc, char* argv[]) {
 	else if (action, "-parse") {
 		yyparse();
 
-		if (not yynerrs)
+		if (root)
 			std::cout << root->to_string() << std::endl;
 	}
 
 	fclose(yyin);
 
-	return yynerrs;
+	return yyerrs;
 }

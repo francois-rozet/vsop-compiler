@@ -40,7 +40,7 @@
 	/* bison global functions */
 	extern int yylex();
 	extern void yyrelocate(const YYLTYPE&);
-	extern void yyerror(const std::string&);
+	extern int yyerror(const std::string&);
 
 	/* keywords */
 	std::unordered_map<std::string, int> keywords = {
