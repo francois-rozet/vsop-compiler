@@ -146,7 +146,15 @@ class-aux:		"}"
 				| method class-aux
 				{ $2->methods.push($1); $$ = $2; }
 				| error "}"
-				{ $$ = new Declaration(); yyerrok; };
+				{ $$ = new Declaration(); yyerrok; }
+				| error ";" class-aux
+				{ $$ = $3; yyerrok; }
+				| error block class-aux /* prevent unmatched { */
+				{ $$ = $3; yyerrok; }
+				| error END
+				{ $$ = new Declaration();
+					yyerror("syntax error, unexpected end-of-file, missing ending } of class declaration");
+				};
 
 field:			object_id ":" type ";"
 				{ $$ = new Field($1, $3, NULL); }
@@ -158,11 +166,15 @@ method:			object_id formals ":" type block
 
 object_id:		OBJECT_IDENTIFIER
 				| TYPE_IDENTIFIER
-				{ $$ = strdup($1); *$$ += 'a' - 'A'; yyerror("syntax error, unexpected type-identifier " + std::string($1) + ", replaced by " + std::string($$)); };
+				{ $$ = strdup(("my" + std::string($1)).c_str());
+					yyerror("syntax error, unexpected type-identifier " + std::string($1) + ", replaced by " + std::string($$));
+				};
 
 type_id:		TYPE_IDENTIFIER
 				| OBJECT_IDENTIFIER
-				{ $$ = strdup($1); *$$ -= 'a' - 'A'; yyerror("syntax error, unexpected object-identifier " + std::string($1) + ", replaced by " + std::string($$)); };
+				{ $$ = strdup($1); *$$ -= 'a' - 'A';
+					yyerror("syntax error, unexpected object-identifier " + std::string($1) + ", replaced by " + std::string($$));
+				};
 
 type:			type_id
 				| "int32"
@@ -182,16 +194,30 @@ formals-aux:	formal ")"
 				| formal "," formals-aux
 				{ $3->push($1); $$ = $3; }
 				| error ")"
-				{ $$ = new List<Formal>(); yyerrok; };
+				{ $$ = new List<Formal>(); yyerrok; }
+				| error "," formals-aux
+				{ $$ = $3; yyerrok; };
 
 block:			"{" block-aux
-				{ $$ = $2; };
+				{ $$ = $2; }
+				| "{" "}"
+				{ $$ = new Args();
+					yyerror("syntax error, empty block");
+				};
 block-aux:		expr "}"
 				{ $$ = new Args(); $$->push($1); }
 				| expr ";" block-aux
 				{ $3->push($1); $$ = $3; }
 				| error "}"
-				{ $$ = new Args(); yyerrok; };
+				{ $$ = new Args(); yyerrok; }
+				| error ";" block-aux
+				{ $$ = $3; }
+				| error block block-aux /* prevent unmatched { */
+				{ $$ = $3; }
+				| error END
+				{ $$ = new Args();
+					yyerror("syntax error, unexpected end-of-file, missing ending } of block");
+				};
 
 expr:			if
 				| while
@@ -274,7 +300,13 @@ args-aux:		expr ")"
 				| expr "," args-aux
 				{ $3->push($1); $$ = $3; }
 				| error ")"
-				{ $$ = new Args(); yyerrok; };
+				{ $$ = new Args(); yyerrok; }
+				| error "," args-aux
+				{ $$ = $3; }
+				| error END
+				{ $$ = new Args();
+					yyerror("syntax error, unexpected end-of-file, missing ending ) of argument list");
+				};
 
 %%
 
