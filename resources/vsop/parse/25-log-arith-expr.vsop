@@ -1,0 +1,7 @@
+class T {
+
+    f(i : int32, j : int32) : bool {
+        not i + 1 <= j ^ 2 and j * 3 - 2 = 42
+    }
+
+}

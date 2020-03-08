@@ -1,0 +1,3 @@
+"This is (* no comment *)."
+"This is not (* unterminated."
+"This is neither a comment, nor // unterminated."

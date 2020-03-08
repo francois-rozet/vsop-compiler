@@ -1,0 +1,8 @@
+"String with backspace_\b"
+"String with\ttab"
+"String with line feed.\n"
+"String with line feed\nand second line.\n"
+"Overwritten\rAllows overwritting current line in well-behaved terminals.\n"
+"Here is a \"nested string\".\n"
+"A string escape sequence is introduced by a `\\`.\n"
+"Here follows a form feed.\x0a\x0bAnd now some new page content.\n"

@@ -1,0 +1,23 @@
+(* One line multi-line comment *)
+1 (* Another one *)
+2 (* One followed by tokens *) 3 4
+(* One followed by another one *) (* Another comment *) 5
+(* One multi-line comment.
+   Second line. *)
+6
+(*
+ * Another style of
+ * multi-lines comments
+ *)
+7
+(* One comment (* With (* nested (* comments *) *) *) *)
+8
+(* One comment with "no string in it *)
+9
+(* One comment // only, no nesting, 10 should be read *) 10
+(* Same, but on several lines
+// I was already commented, so 11 should be read *) 11
+(**) 12 (* (*) In nested comment *)
+Still commented *)
+13
+(* Final comment *)

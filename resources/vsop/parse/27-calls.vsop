@@ -1,0 +1,11 @@
+class C {
+
+    get42() : int32 {
+        1 + addOne(40)
+    }
+
+    addOne(i : int32) : int32 { i + self.one() }
+
+    one() : int32 { 1 }
+
+}

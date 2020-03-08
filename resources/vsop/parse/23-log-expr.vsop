@@ -1,0 +1,7 @@
+class T {
+
+    f(i : int32, j : int32) : bool {
+        not i <= j and j = 42 and true
+    }
+
+}

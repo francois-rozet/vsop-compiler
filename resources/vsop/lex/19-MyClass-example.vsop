@@ -1,0 +1,5 @@
+class MyClass {
+    s : string <- "One\n\x1b[33;mTwo and \
+                   three\r\n";
+    i : int32 <- 0x1b;
+}

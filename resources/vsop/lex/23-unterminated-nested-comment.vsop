@@ -1,0 +1,7 @@
+42
+(* Top-level comment
+  (* Unterminated comment
+  ^-- Error should point here
+    (* Terminated netsted comment *)
+    (* Another one (* (nested even deeper) *)
+     *)

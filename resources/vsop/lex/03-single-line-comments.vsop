@@ -1,0 +1,7 @@
+// This should be commented
+1
+// Other comment, including numbers: 42 1984
+        2 // After space
+	3	// After tab //
+4 // With unterminated string "I am not a string
+5 // With unterminated comment (* I am not a nested comment

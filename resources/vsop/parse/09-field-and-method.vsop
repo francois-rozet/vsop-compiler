@@ -1,0 +1,4 @@
+class Test {
+    aField : int32;
+    aMethod() : bool { true }
+}
