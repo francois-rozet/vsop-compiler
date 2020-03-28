@@ -20,120 +20,101 @@ class List: public Node {
 	public:
 		/* Constructors */
 		List() {}
+		List(std::vector<T*> stack): stack(stack) {}
+
+		/* Fields */
+		std::vector<T*> stack;
 
 		/* Methods */
-		List& push(Node* t) { if (t) stack_.push_back(*static_cast<T*>(t)); return *this; }
+		List& push(Node* t) { if (t) stack.push_back(static_cast<T*>(t)); return *this; }
 
 		virtual std::string to_string() const {
-			if (stack_.empty())
+			if (stack.empty())
 				return "[]";
 
-			std::string s = stack_.back().to_string();
+			std::string s = stack.back()->to_string();
 
-			for (auto it = stack_.rbegin() + 1; it != stack_.rend(); ++it)
-				s += "," + it->to_string();
+			for (auto it = stack.rbegin() + 1; it != stack.rend(); ++it)
+				s += "," + (*it)->to_string();
 
 			return "[" + s + "]";
 		}
 
 		/* Accessors */
-		size_t size() const { return stack_.size(); }
-		const T& back() const { return stack_.back(); }
-
-	protected:
-		/* Variables */
-		std::vector<T> stack_;
+		size_t size() const { return stack.size(); }
+		const T* back() const { return stack.back(); }
 };
 
-class iExpr: public Node {
+class Expr: public Node {};
+
+class Block: public Expr {
 	public:
 		/* Constructors */
-		iExpr(Node* expr) : expr_(expr) {}
+		Block() {}
+		Block(const List<Expr>& exprs): exprs(exprs) {}
+
+		/* Fields */
+		List<Expr> exprs;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return expr_->to_string();
-		}
-	private:
-		/* Variables */
-		Node* expr_;
-};
-
-class Args: public List<iExpr> {
-	public:
-		/* Methods */
-		List& push(Node* t) { if (t) stack_.push_back(iExpr(t)); return *this; }
-};
-
-class Block: public Node {
-	public:
-		/* Constructors */
-		Block(const Args& exprs) : exprs_(exprs) {}
-
-		/* Methods */
-		virtual std::string to_string() const {
-			if (exprs_.size() == 1)
-				return exprs_.back().to_string();
+			if (exprs.size() == 1)
+				return exprs.back()->to_string();
 			else
-				return exprs_.to_string();
+				return exprs.to_string();
 		}
-
-	private:
-		/* Variables */
-		Args exprs_;
 };
 
 class Field: public Node {
 	public:
 		/* Constructors */
-		Field(const std::string& name, const std::string& type, Node* init):
-			name_(name), type_(type), init_(init) {}
+		Field(const std::string& name, const std::string& type, Expr* init):
+			name(name), type(type), init(init) {}
+
+		/* Fields */
+		std::string name, type;
+		Expr* init;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			if (init_)
-				return "Field(" + name_ + "," + type_ + "," + init_->to_string() + ")";
-			else
-				return "Field(" + name_ + "," + type_ + ")";
-		}
+			std::string str = "Field(" + name + "," + type;
 
-	private:
-		/* Variables */
-		std::string name_, type_;
-		Node* init_;
+			if (init)
+				str += "," + init->to_string();
+
+			return str + ")";
+		}
 };
 
 class Formal: public Node {
 	public:
 		/* Constructors */
-		Formal(const std::string& name, const std::string& type): name_(name), type_(type) {}
+		Formal(const std::string& name, const std::string& type): name(name), type(type) {}
+
+		/* Fields */
+		std::string name, type;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return name_ + ":" + type_;
+			return name + ":" + type;
 		}
-
-	private:
-		/* Variables */
-		std::string name_, type_;
 };
 
 class Method: public Node {
 	public:
 		/* Constructors */
 		Method(const std::string& name, const List<Formal>& formals, const std::string& type, const Block& block):
-			name_(name), formals_(formals), type_(type), block_(block) {}
+			name(name), formals(formals), type(type), block(block) {}
+
+		/* Fields */
+		std::string name, type;
+		List<Formal> formals;
+		Block block;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return "Method(" + name_ + "," + formals_.to_string() + "," + type_ + "," + block_.to_string() + ")";
+			return "Method(" + name + "," + formals.to_string() + "," + type + "," + block.to_string() + ")";
 		}
-
-	private:
-		/* Variables */
-		std::string name_, type_;
-		List<Formal> formals_;
-		Block block_;
 };
 
 struct Declaration {
@@ -145,129 +126,131 @@ class Class: public Node {
 	public:
 		/* Constructors */
 		Class(const std::string& name, const std::string& parent, const List<Field>& fields, const List<Method>& methods):
-			name_(name), parent_(parent), fields_(fields), methods_(methods) {}
+			name(name), parent(parent), fields(fields), methods(methods) {}
+
+		/* Fields */
+		std::string name, parent;
+		List<Field> fields;
+		List<Method> methods;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return "Class(" + name_ + "," + parent_ + "," + fields_.to_string() + "," + methods_.to_string() + ")";
+			return "Class(" + name + "," + parent + "," + fields.to_string() + "," + methods.to_string() + ")";
 		}
-
-	private:
-		/* Variables */
-		std::string name_, parent_;
-		List<Field> fields_;
-		List<Method> methods_;
 };
 
-class If: public Node {
+class If: public Expr {
 	public:
 		/* Constructors */
-		If(Node* cond, Node* then, Node* els):
-			cond_(cond), then_(then), else_(els) {}
+		If(Expr* cond, Expr* then, Expr* els):
+			cond(cond), then(then), els(els) {}
+
+		/* Fields */
+		Expr* cond, * then, * els;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			if (else_)
-				return "If(" + cond_->to_string() + "," + then_->to_string() + "," + else_->to_string() + ")";
-			else
-				return "If(" + cond_->to_string() + "," + then_->to_string() + ")";
-		}
+			std::string str = "If(" + cond->to_string() + "," + then->to_string();
 
-	private:
-		/* Variables */
-		Node* cond_, * then_, * else_;
+			if (els)
+				str += "," + els->to_string();
+
+			return str + ")";
+		}
 };
 
-class While: public Node {
+class While: public Expr {
 	public:
 		/* Constructors */
-		While(Node* cond, Node* body): cond_(cond), body_(body) {}
+		While(Expr* cond, Expr* body): cond(cond), body(body) {}
+
+		/* Fields */
+		Expr* cond, * body;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return "While(" + cond_->to_string() + "," + body_->to_string() + ")";
+			return "While(" + cond->to_string() + "," + body->to_string() + ")";
 		}
-
-	private:
-		/* Variables */
-		Node* cond_, * body_;
 };
 
-class Let: public Node {
+class Let: public Expr {
 	public:
 		/* Constructors */
-		Let(const std::string& name, const std::string& type, Node* init, Node* scope):
-			name_(name), type_(type), init_(init), scope_(scope) {}
+		Let(const std::string& name, const std::string& type, Expr* init, Expr* scope):
+			name(name), type(type), init(init), scope(scope) {}
+
+		/* Fields */
+		std::string name, type;
+		Expr* init, * scope;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			if (init_)
-				return "Let(" + name_ + "," + type_ + "," + init_->to_string() + "," + scope_->to_string() + ")";
-			else
-				return "Let(" + name_ + "," + type_ + "," + scope_->to_string() + ")";
-		}
+			std::string str = "Let(" + name + "," + type + ",";
 
-	private:
-		/* Variables */
-		std::string name_, type_;
-		Node* init_, * scope_;
+			if (init)
+				str += init->to_string() + ",";
+
+			return str + scope->to_string() + ")";
+		}
 };
 
-class Assign: public Node {
+class Assign: public Expr {
 	public:
 		/* Constructors */
-		Assign(const std::string& name, Node* value):
-			name_(name), value_(value) {}
+		Assign(const std::string& name, Expr* value):
+			name(name), value(value) {}
+
+		/* Fields */
+		std::string name;
+		Expr* value;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return "Assign(" + name_ + "," + value_->to_string() + ")";
+			return "Assign(" + name + "," + value->to_string() + ")";
 		}
-
-	private:
-		/* Variables */
-		std::string name_;
-		Node* value_;
 };
 
-class Unary: public Node {
+class Unary: public Expr {
 	public:
 		enum Type { NOT, MINUS, ISNULL };
 
 		/* Constructors */
-		Unary(Type type, Node* value): type_(type), value_(value) {}
+		Unary(Type type, Expr* value): type(type), value(value) {}
+
+		/* Fields */
+		Type type;
+		Expr* value;
 
 		/* Methods */
 		virtual std::string to_string() const {
 			std::string op;
 
-			switch (type_) {
+			switch (type) {
 				case NOT: op = "not"; break;
 				case MINUS: op = "-"; break;
 				case ISNULL: op = "isnull"; break;
 			}
 
-			return "UnOp(" + op + "," + value_->to_string() + ")";
+			return "UnOp(" + op + "," + value->to_string() + ")";
 		}
-
-	private:
-		/* Variables */
-		Type type_;
-		Node* value_;
 };
 
-class Binary: public Node {
+class Binary: public Expr {
 	public:
 		enum Type { AND, EQUAL, LOWER, LOWER_EQUAL, PLUS, MINUS, TIMES, DIV, POW };
 
 		/* Constructors */
-		Binary(Type type, Node* left, Node* right): type_(type), left_(left), right_(right) {}
+		Binary(Type type, Expr* left, Expr* right): type(type), left(left), right(right) {}
+
+		/* Fields */
+		Type type;
+		Expr* left, * right;
 
 		/* Methods */
 		virtual std::string to_string() const {
 			std::string op;
 
-			switch (type_) {
+			switch (type) {
 				case AND: op = "and"; break;
 				case EQUAL: op = "="; break;
 				case LOWER: op = "<"; break;
@@ -279,91 +262,84 @@ class Binary: public Node {
 				case POW: op = "^"; break;
 			}
 
-			return "BinOp(" + op + "," + left_->to_string() + "," + right_->to_string() + ")";
+			return "BinOp(" + op + "," + left->to_string() + "," + right->to_string() + ")";
 		}
-
-	private:
-		/* Variables */
-		Type type_;
-		Node* left_, * right_;
 };
 
-class Call: public Node {
+class Call: public Expr {
 	public:
 		/* Constructors */
-		Call(Node* scope, const std::string& name, const Args& args):
-			scope_(scope), name_(name), args_(args) {}
+		Call(Expr* scope, const std::string& name, const List<Expr>& args):
+			scope(scope), name(name), args(args) {}
+
+		/* Fields */
+		Node* scope;
+		std::string name;
+		List<Expr> args;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			if (scope_)
-				return "Call(" + scope_->to_string() + "," + name_ + "," + args_.to_string() + ")";
-			else
-				return "Call(self," + name_ + "," + args_.to_string() + ")";
+			std::string str = "Call(";
+			str += scope ? scope->to_string() : "self";
+			return str + "," + name + "," + args.to_string() + ")";
 		}
-
-	private:
-		/* Variables */
-		Node* scope_;
-		std::string name_;
-		Args args_;
 };
 
-class New: public Node {
+class New: public Expr {
 	public:
 		/* Constructors */
-		New(const std::string& type): type_(type) {}
+		New(const std::string& type): type(type) {}
+
+		/* Fields */
+		std::string type;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return "New(" + type_ + ")";
+			return "New(" + type + ")";
 		}
-
-	private:
-		/* Variables */
-		std::string type_;
 };
 
-class Identifier: public Node {
+class Identifier: public Expr {
 	public:
 		/* Constructors */
-		Identifier(const std::string& id): id_(id) {}
+		Identifier(const std::string& id): id(id) {}
+
+		/* Fields */
+		std::string id;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return id_;
+			return id;
 		}
-
-	private:
-		/* Variables */
-		std::string id_;
 };
 
-class Integer: public Node {
+class Integer: public Expr {
 	public:
 		/* Constructors */
-		Integer(int value): value_(value) {}
+		Integer(int value): value(value) {}
+
+		/* Fields */
+		int value;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return std::to_string(value_);
+			return std::to_string(value);
 		}
-
-	private:
-		/* Variables */
-		int value_;
 };
 
-class String: public Node {
+class String: public Expr {
 	public:
 		/* Constructors */
-		String(const std::string& str): str_(str) {}
+		String(const std::string& str): str(str) {}
+
+		/* Fields */
+		std::string str;
 
 		/* Methods */
 		virtual std::string to_string() const {
 			std::string temp;
 
-			for (const char& c: str_)
+			for (const char& c: str)
 				switch (c) {
 					case '\"':
 					case '\\': temp += char2hex(c); break;
@@ -376,28 +352,23 @@ class String: public Node {
 
 			return "\"" + temp + "\"";
 		}
-
-	private:
-		/* Variables */
-		std::string str_;
 };
 
-class Boolean: public Node {
+class Boolean: public Expr {
 	public:
 		/* Constructors */
-		Boolean(bool b): b_(b) {}
+		Boolean(bool b): b(b) {}
+
+		/* Fields */
+		bool b;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			return b_ ? "true" : "false";
+			return b ? "true" : "false";
 		}
-
-	private:
-		/* Variables */
-		bool b_;
 };
 
-class Unit: public Node {
+class Unit: public Expr {
 	public:
 		/* Methods */
 		virtual std::string to_string() const {

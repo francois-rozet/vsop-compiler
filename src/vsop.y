@@ -12,7 +12,8 @@
 	int num;
 	char* id;
 	Node* node;
-	Args* args;
+	Expr* expr;
+	List<Expr>* block;
 	Declaration* decl;
 	List<Class>* pgm;
 	List<Formal>* forms;
@@ -48,7 +49,7 @@
 	int yyerror(const std::string&);
 
 	/* AST */
-	Node* root;
+	List<Class>* root;
 %}
 
 %define parse.error verbose
@@ -101,8 +102,9 @@
 %token <id> ASSIGN "<-"
 
 %nterm <id> type class-parent type_id object_id
-%nterm <node> class field method formal expr if while let unary binary call literal
-%nterm <args> block block-aux args args-aux
+%nterm <node> class field method formal
+%nterm <expr> expr if while let unary binary call literal
+%nterm <block> block block-aux args args-aux
 %nterm <decl> class-aux
 %nterm <pgm> program
 %nterm <forms> formals formals-aux
@@ -201,21 +203,21 @@ formals-aux:	formal ")"
 block:			"{" block-aux
 				{ $$ = $2; }
 				| "{" "}"
-				{ $$ = new Args();
+				{ $$ = new List<Expr>();
 					yyerror("syntax error, empty block");
 				};
 block-aux:		expr "}"
-				{ $$ = new Args(); $$->push($1); }
+				{ $$ = new List<Expr>(); $$->push($1); }
 				| expr ";" block-aux
 				{ $3->push($1); $$ = $3; }
 				| error "}"
-				{ $$ = new Args(); yyerrok; }
+				{ $$ = new List<Expr>(); yyerrok; }
 				| error ";" block-aux
 				{ $$ = $3; }
 				| error block block-aux /* prevent unmatched { */
 				{ $$ = $3; }
 				| error END
-				{ $$ = new Args();
+				{ $$ = new List<Expr>();
 					yyerror("syntax error, unexpected end-of-file, missing ending } of block");
 				};
 
@@ -292,19 +294,19 @@ call:			expr "." object_id args
 				{ $$ = new Call(NULL, $1, *$2); };
 
 args:			"(" ")"
-				{ $$ = new Args(); }
+				{ $$ = new List<Expr>(); }
 				| "(" args-aux
 				{ $$ = $2; };
 args-aux:		expr ")"
-				{ $$ = new Args(); $$->push($1); }
+				{ $$ = new List<Expr>(); $$->push($1); }
 				| expr "," args-aux
 				{ $3->push($1); $$ = $3; }
 				| error ")"
-				{ $$ = new Args(); yyerrok; }
+				{ $$ = new List<Expr>(); yyerrok; }
 				| error "," args-aux
 				{ $$ = $3; }
 				| error END
-				{ $$ = new Args();
+				{ $$ = new List<Expr>();
 					yyerror("syntax error, unexpected end-of-file, missing ending ) of argument list");
 				};
 
