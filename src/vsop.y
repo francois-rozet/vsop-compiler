@@ -36,9 +36,7 @@
 %{
 	/* flex global variables */
 	extern FILE* yyin;
-
-	/* flex global functions */
-	extern int lex();
+	extern int yymode;
 
 	/* bison variables */
 	int yyerrs = 0;
@@ -46,7 +44,7 @@
 	/* bison functions */
 	int yylex(void);
 	void yyrelocate(const YYLTYPE&);
-	int yyerror(const std::string&);
+	void yyerror(const std::string&);
 
 	/* AST */
 	List<Class>* root;
@@ -59,7 +57,7 @@
 %token END 0 "end-of-file"
 
 %token <num> INTEGER_LITERAL "integer-literal"
-%token <node> STRING_LITERAL "string-literal"
+%token <id> STRING_LITERAL "string-literal"
 %token <id> TYPE_IDENTIFIER "type-identifier"
 %token <id> OBJECT_IDENTIFIER "object-identifier"
 
@@ -101,6 +99,9 @@
 %token <id> LOWER_EQUAL "<="
 %token <id> ASSIGN "<-"
 
+%token START_LEXER START_PARSER;
+%start start;
+
 %nterm <id> type class-parent type_id object_id
 %nterm <node> class field method formal
 %nterm <expr> expr if while let unary binary call literal
@@ -123,6 +124,23 @@
 %left "."
 
 %%
+
+start:			START_LEXER token
+				| START_PARSER program;
+
+token:			/* */
+				| token INTEGER_LITERAL
+				{ yyprint("integer-literal," + Integer($2).to_string()); }
+				| token STRING_LITERAL
+				{ yyprint("string-literal," + String($2).to_string()); }
+				| token TYPE_IDENTIFIER
+				{ yyprint("type-identifier," + std::string($2)); }
+				| token OBJECT_IDENTIFIER
+				{ yyprint("object-identifier," + std::string($2)); }
+				| token keyword
+				{ yyprint(std::string($<id>2)); };
+
+keyword:		"and" | "bool" | "class" | "do" | "else" | "extends" | "false" | "if" | "in" | "int32" | "isnull" | "let" | "new" | "not" | "string" | "then" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "<" | "<=" | "<-";
 
 program:		class
 				{ $$ = new List<Class>(); $$->push($1); root = $$; }
@@ -283,6 +301,7 @@ binary:			expr "and" expr
 literal:		INTEGER_LITERAL
 				{ $$ = new Integer($1); }
 				| STRING_LITERAL
+				{ $$ = new String($1); }
 				| "true"
 				{ $$ = new Boolean(true); }
 				| "false"
@@ -317,11 +336,58 @@ void yyrelocate(const YYLTYPE& loc) {
 	yylloc.first_column = loc.first_column;
 }
 
-int yyerror(const std::string& msg) {
+void yyprint(const std::string& msg) {
+	std::cout << yylloc.first_line << ',' << yylloc.first_column << ',';
+	std::cout << msg << std::endl;
+}
+
+void yyerror(const std::string& msg) {
 	std::cerr << yylloc.filename << ':' << yylloc.first_line << ':' << yylloc.first_column << ':';
 	std::cerr << ' ' << msg << std::endl;
+	++yyerrs;
+}
 
-	return ++yyerrs;
+void yyopen(char* filename) {
+	yylloc.filename = filename;
+	yyin = fopen(yylloc.filename, "r");
+
+	if (not yyin)
+		std::cerr << "vsopc: fatal-error: " << yylloc.filename << ": No such file or directory" << std::endl;
+}
+
+void yyclose() {
+	fclose(yyin);
+}
+
+int lexer(char* filename) {
+	yyopen(filename);
+
+	if (not yyin)
+		return 1;
+
+	yymode = START_LEXER;
+	yyparse();
+
+	yyclose();
+
+	return yyerrs;
+}
+
+int parser(char* filename) {
+	yyopen(filename);
+
+	if (not yyin)
+		return 1;
+
+	yymode = START_PARSER;
+	yyparse();
+
+	if (root)
+		std::cout << root->to_string() << std::endl;
+
+	yyclose();
+
+	return yyerrs;
 }
 
 int main (int argc, char* argv[]) {
@@ -332,26 +398,12 @@ int main (int argc, char* argv[]) {
 		return 1;
 	}
 
-	yylloc.filename = argv[2];
-	yyin = fopen(yylloc.filename, "r");
-
-	if (not yyin) {
-		std::cerr << "vsopc: fatal-error: " << yylloc.filename << ": No such file or directory" << std::endl;
-		return 1;
-	}
-
 	std::string action = argv[1];
 
 	if (action == "-lex")
-		lex();
-	else if (action, "-parse") {
-		yyparse();
+		return lexer(argv[2]);
+	else if (action == "-parse")
+		return parser(argv[2]);
 
-		if (root)
-			std::cout << root->to_string() << std::endl;
-	}
-
-	fclose(yyin);
-
-	return yyerrs;
+	return 0;
 }

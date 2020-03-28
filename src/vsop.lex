@@ -2,15 +2,17 @@
 	#define YY_USER_ACTION yyupdate();
 
 	#include "tools.hpp"
-	#include "ast.hpp"
 	#include "vsop.tab.h"
 
-	#include <iostream>
 	#include <string.h>
 	#include <vector>
 	#include <unordered_map>
 
-	/* flex variables */
+	/* bison global functions */
+	extern int yyerror(const std::string&);
+
+	/* flex global variables */
+	int yymode;
 	std::string yybuffer;
 	std::vector<YYLTYPE> yystack;
 
@@ -31,16 +33,13 @@
 		yystack.push_back(yylloc);
 	}
 
-	YYLTYPE yypop() {
+	void yypop() {
 		YYLTYPE back = yystack.back();
 		yystack.pop_back();
-		return back;
-	}
 
-	/* bison global functions */
-	extern int yylex();
-	extern void yyrelocate(const YYLTYPE&);
-	extern int yyerror(const std::string&);
+		yylloc.first_line = back.first_line;
+		yylloc.first_column = back.first_column;
+	}
 
 	/* keywords */
 	std::unordered_map<std::string, int> keywords = {
@@ -97,6 +96,14 @@ single_line_comment			"//"[^\0\n]*
 %x STRING COMMENT
 %%
 
+%{
+	if (yymode) {
+		int temp = yymode;
+		yymode = 0;
+		return temp;
+	}
+%}
+
 {whitespace}				/* */
 {single_line_comment}		/* */
 {type_identifier}			yylval.id = strdup(yytext); return TYPE_IDENTIFIER;
@@ -124,7 +131,7 @@ single_line_comment			"//"[^\0\n]*
 "<-"						yylval.id = strdup("assign"); return ASSIGN;
 "<"							yylval.id = strdup("lower"); return LOWER;
 
-<STRING>\"					yyrelocate(yypop()); yylval.node = new String(yybuffer); BEGIN(INITIAL); return STRING_LITERAL;
+<STRING>\"					yypop(); yylval.id = &yybuffer[0]; BEGIN(INITIAL); return STRING_LITERAL;
 <STRING>{regular_char}+		yybuffer += yytext;
 <STRING>{escape_sequence}	if (yytext[1] != '\n') yybuffer += esc2char(yytext);
 
@@ -132,26 +139,6 @@ single_line_comment			"//"[^\0\n]*
 <COMMENT>"*)"				yypop(); if (yystack.empty()) BEGIN(INITIAL);
 <COMMENT>[^\0]				/* */
 
-<STRING,COMMENT><<EOF>>		yyrelocate(yypop()); yyerror("lexical error, unterminated encapsulated environment"); return END;
+<STRING,COMMENT><<EOF>>		yypop(); yyerror("lexical error, unterminated encapsulated environment"); return END;
 
 <*>.|\n						yyerror("lexical error, invalid character " + char2hex(yytext[0]));
-
-%%
-
-int lex() {
-	for (int type = yylex(); type; type = yylex()) {
-		std::cout << yylloc.first_line << ',' << yylloc.first_column << ',';
-
-		switch (type) {
-			case INTEGER_LITERAL:	std::cout << "integer-literal," << yylval.num; break;
-			case STRING_LITERAL:	std::cout << "string-literal," << yylval.node->to_string(); break;
-			case TYPE_IDENTIFIER:	std::cout << "type-identifier," << yylval.id; break;
-			case OBJECT_IDENTIFIER:	std::cout << "object-identifier," << yylval.id; break;
-			default:				std::cout << yylval.id;
-		}
-
-		std::cout << std::endl;
-	}
-
-	return 0;
-}
