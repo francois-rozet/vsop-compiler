@@ -51,7 +51,7 @@
 	int yylex(void);
 	int yyparse(void);
 	void yylocate(Node*, const YYLTYPE&);
-	void yyrelocate(Node*);
+	void yyrelocate(const Node*);
 	void yyrelocate(const YYLTYPE&);
 	void yyprint(const std::string&);
 	void yyerror(const std::string&);
@@ -356,7 +356,7 @@ void yylocate(Node* n, const YYLTYPE& loc) {
 	n->column = loc.first_column;
 }
 
-void yyrelocate(Node* n) {
+void yyrelocate(const Node* n) {
 	yylloc.first_line = n->line;
 	yylloc.first_column = n->column;
 }
