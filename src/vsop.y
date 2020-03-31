@@ -11,12 +11,15 @@
 {
 	int num;
 	char* id;
-	Node* node;
-	Expr* expr;
-	List<Expr>* block;
+	List<Class>* classes;
+	Class* clas;
 	Declaration* decl;
-	List<Class>* pgm;
-	List<Formal>* forms;
+	Field* field;
+	Method* method;
+	List<Formal>* formals;
+	Formal* formal;
+	List<Expr>* block;
+	Expr* expr;
 }
 
 %code requires {
@@ -34,20 +37,26 @@
 %locations // yylloc
 
 %{
+	/* main gloabl variables */
+	extern int yymode;
+	extern List<Class> yyprogram;
+
 	/* flex global variables */
 	extern FILE* yyin;
-	extern int yymode;
 
 	/* bison variables */
 	int yyerrs = 0;
 
 	/* bison functions */
 	int yylex(void);
+	int yyparse(void);
+	void yylocate(Node*, const YYLTYPE&);
+	void yyrelocate(Node*);
 	void yyrelocate(const YYLTYPE&);
+	void yyprint(const std::string&);
 	void yyerror(const std::string&);
-
-	/* AST */
-	List<Class>* root;
+	bool yyopen(char*);
+	void yyclose();
 %}
 
 %define parse.error verbose
@@ -103,12 +112,15 @@
 %start start;
 
 %nterm <id> type class-parent type_id object_id
-%nterm <node> class field method formal
-%nterm <expr> expr if while let unary binary call literal
-%nterm <block> block block-aux args args-aux
+%nterm <classes> program
+%nterm <clas> class
 %nterm <decl> class-aux
-%nterm <pgm> program
-%nterm <forms> formals formals-aux
+%nterm <field> field
+%nterm <method> method
+%nterm <formals> formals formals-aux
+%nterm <formal> formal
+%nterm <block> block block-aux args args-aux
+%nterm <expr> expr expr-aux if while let unary binary call literal init
 
 %precedence "if" "then" "while" "do" "let" "in"
 %precedence "else"
@@ -132,27 +144,27 @@ token:			/* */
 				| token INTEGER_LITERAL
 				{ yyprint("integer-literal," + Integer($2).to_string()); }
 				| token STRING_LITERAL
-				{ yyprint("string-literal," + String($2).to_string()); }
+				{ yyprint("string-literal," + String($2).to_string());  }
 				| token TYPE_IDENTIFIER
 				{ yyprint("type-identifier," + std::string($2)); }
 				| token OBJECT_IDENTIFIER
 				{ yyprint("object-identifier," + std::string($2)); }
 				| token keyword
-				{ yyprint(std::string($<id>2)); };
+				{ yyprint($<id>2); };
 
 keyword:		"and" | "bool" | "class" | "do" | "else" | "extends" | "false" | "if" | "in" | "int32" | "isnull" | "let" | "new" | "not" | "string" | "then" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "<" | "<=" | "<-";
 
 program:		class
-				{ $$ = new List<Class>(); $$->push($1); root = $$; }
+				{ yyprogram.add($1); }
 				| class program
-				{ $2->push($1); $$ = $2; }
+				{ yyprogram.add($1); }
 				| error
-				{ $$ = new List<Class>(); root = $$; yyerrok; }
+				{ yyerrok; }
 				| error program
-				{ $$ = $2; yyerrok; };
+				{ yyerrok; };
 
 class:			"class" type_id class-parent "{" class-aux
-				{ $$ = new Class($2, $3, $5->fields, $5->methods); };
+				{ $$ = new Class($2, $3, $5->fields, $5->methods); yylocate($$, @$); };
 
 class-parent:	/* */
 				{ $$ = strdup("Object"); }
@@ -162,9 +174,9 @@ class-parent:	/* */
 class-aux:		"}"
 				{ $$ = new Declaration(); }
 				| field class-aux
-				{ $2->fields.push($1); $$ = $2; }
+				{ $2->fields.add($1); $$ = $2;	}
 				| method class-aux
-				{ $2->methods.push($1); $$ = $2; }
+				{ $2->methods.add($1); $$ = $2;	}
 				| error "}"
 				{ $$ = new Declaration(); yyerrok; }
 				| error ";" class-aux
@@ -173,26 +185,43 @@ class-aux:		"}"
 				{ $$ = $3; yyerrok; }
 				| error END
 				{ $$ = new Declaration();
+					yyrelocate(@$);
 					yyerror("syntax error, unexpected end-of-file, missing ending } of class declaration");
 				};
 
-field:			object_id ":" type ";"
-				{ $$ = new Field($1, $3, NULL); }
-				| object_id ":" type "<-" expr ";"
-				{ $$ = new Field($1, $3, $5); };
+field:			object_id ":" type init ";"
+				{ $$ = new Field($1, $3, $4); yylocate($$, @$); };
 
 method:			object_id formals ":" type block
-				{ $$ = new Method($1, *$2, $4, Block(*$5)); };
+				{ $$ = new Method($1, *$2, $4, Block(*$5)); yylocate($$, @$); };
+
+formal:			object_id ":" type
+				{ $$ = new Formal($1, $3); yylocate($$, @$); };
+
+formals:		"(" ")"
+				{ $$ = new List<Formal>(); }
+				| "(" formals-aux
+				{ $$ = $2; };
+formals-aux:	formal ")"
+				{ $$ = new List<Formal>(); $$->add($1); }
+				| formal "," formals-aux
+				{ $3->add($1); $$ = $3; }
+				| error ")"
+				{ $$ = new List<Formal>(); yyerrok; }
+				| error "," formals-aux
+				{ $$ = $3; yyerrok; };
 
 object_id:		OBJECT_IDENTIFIER
 				| TYPE_IDENTIFIER
 				{ $$ = strdup(("my" + std::string($1)).c_str());
+					yyrelocate(@$);
 					yyerror("syntax error, unexpected type-identifier " + std::string($1) + ", replaced by " + std::string($$));
 				};
 
 type_id:		TYPE_IDENTIFIER
 				| OBJECT_IDENTIFIER
 				{ $$ = strdup($1); *$$ -= 'a' - 'A';
+					yyrelocate(@$);
 					yyerror("syntax error, unexpected object-identifier " + std::string($1) + ", replaced by " + std::string($$));
 				};
 
@@ -202,32 +231,17 @@ type:			type_id
 				| "string"
 				| "unit";
 
-formal:			object_id ":" type
-				{ $$ = new Formal($1, $3); };
-
-formals:		"(" ")"
-				{ $$ = new List<Formal>(); }
-				| "(" formals-aux
-				{ $$ = $2; };
-formals-aux:	formal ")"
-				{ $$ = new List<Formal>(); $$->push($1); }
-				| formal "," formals-aux
-				{ $3->push($1); $$ = $3; }
-				| error ")"
-				{ $$ = new List<Formal>(); yyerrok; }
-				| error "," formals-aux
-				{ $$ = $3; yyerrok; };
-
 block:			"{" block-aux
 				{ $$ = $2; }
 				| "{" "}"
 				{ $$ = new List<Expr>();
+					yyrelocate(@$);
 					yyerror("syntax error, empty block");
 				};
 block-aux:		expr "}"
-				{ $$ = new List<Expr>(); $$->push($1); }
+				{ $$ = new List<Expr>(); $$->add($1); }
 				| expr ";" block-aux
-				{ $3->push($1); $$ = $3; }
+				{ $3->add($1); $$ = $3; }
 				| error "}"
 				{ $$ = new List<Expr>(); yyerrok; }
 				| error ";" block-aux
@@ -236,10 +250,13 @@ block-aux:		expr "}"
 				{ $$ = $3; }
 				| error END
 				{ $$ = new List<Expr>();
+					yyrelocate(@$);
 					yyerror("syntax error, unexpected end-of-file, missing ending } of block");
 				};
 
-expr:			if
+expr:			expr-aux
+				{ $$ = $1; yylocate($$, @$); };
+expr-aux:		if
 				| while
 				| let
 				| unary
@@ -267,10 +284,12 @@ if:				"if" expr "then" expr
 while:			"while" expr "do" expr
 				{ $$ = new While($2, $4); };
 
-let:			"let" object_id ":" type "in" expr
-				{ $$ = new Let($2, $4, NULL, $6); }
-				| "let" object_id ":" type "<-" expr "in" expr
-				{ $$ = new Let($2, $4, $6, $8); };
+let:			"let" object_id ":" type init "in" expr
+				{ $$ = new Let($2, $4, $5, $7); };
+init:			/* */
+				{ $$ = NULL; }
+				| "<-" expr
+				{ $$ = $2; };
 
 unary:			"not" expr
 				{ $$ = new Unary(Unary::NOT, $2); }
@@ -310,26 +329,37 @@ literal:		INTEGER_LITERAL
 call:			expr "." object_id args
 				{ $$ = new Call($1, $3, *$4); }
 				| object_id args
-				{ $$ = new Call(NULL, $1, *$2); };
+				{ $$ = new Call(new Identifier("self"), $1, *$2); };
 
 args:			"(" ")"
 				{ $$ = new List<Expr>(); }
 				| "(" args-aux
 				{ $$ = $2; };
 args-aux:		expr ")"
-				{ $$ = new List<Expr>(); $$->push($1); }
+				{ $$ = new List<Expr>(); $$->add($1); }
 				| expr "," args-aux
-				{ $3->push($1); $$ = $3; }
+				{ $3->add($1); $$ = $3; }
 				| error ")"
 				{ $$ = new List<Expr>(); yyerrok; }
 				| error "," args-aux
 				{ $$ = $3; }
 				| error END
 				{ $$ = new List<Expr>();
+					yyrelocate(@$);
 					yyerror("syntax error, unexpected end-of-file, missing ending ) of argument list");
 				};
 
 %%
+
+void yylocate(Node* n, const YYLTYPE& loc) {
+	n->line = loc.first_line;
+	n->column = loc.first_column;
+}
+
+void yyrelocate(Node* n) {
+	yylloc.first_line = n->line;
+	yylloc.first_column = n->column;
+}
 
 void yyrelocate(const YYLTYPE& loc) {
 	yylloc.first_line = loc.first_line;
@@ -347,63 +377,13 @@ void yyerror(const std::string& msg) {
 	++yyerrs;
 }
 
-void yyopen(char* filename) {
+bool yyopen(char* filename) {
 	yylloc.filename = filename;
 	yyin = fopen(yylloc.filename, "r");
 
-	if (not yyin)
-		std::cerr << "vsopc: fatal-error: " << yylloc.filename << ": No such file or directory" << std::endl;
+	return yyin ? true : false;
 }
 
 void yyclose() {
 	fclose(yyin);
-}
-
-int lexer(char* filename) {
-	yyopen(filename);
-
-	if (not yyin)
-		return 1;
-
-	yymode = START_LEXER;
-	yyparse();
-
-	yyclose();
-
-	return yyerrs;
-}
-
-int parser(char* filename) {
-	yyopen(filename);
-
-	if (not yyin)
-		return 1;
-
-	yymode = START_PARSER;
-	yyparse();
-
-	if (root)
-		std::cout << root->to_string() << std::endl;
-
-	yyclose();
-
-	return yyerrs;
-}
-
-int main (int argc, char* argv[]) {
-	if (argc < 2)
-		return 0;
-	else if (argc < 3) {
-		std::cerr << "vsopc " << argv[1] << ": error: no input file" << std::endl;
-		return 1;
-	}
-
-	std::string action = argv[1];
-
-	if (action == "-lex")
-		return lexer(argv[2]);
-	else if (action == "-parse")
-		return parser(argv[2]);
-
-	return 0;
 }

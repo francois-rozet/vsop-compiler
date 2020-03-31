@@ -10,7 +10,7 @@ CXXFLAGS = -std=c++14 -O3
 # Executable files
 all: $(ALL)
 
-$(ALL): %c: $(SRCDIR)%.yy.c $(SRCDIR)%.tab.c
+$(ALL): %c: $(SRCDIR)%c.cpp $(SRCDIR)%.yy.c $(SRCDIR)%.tab.c
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
 $(SRCDIR)%.tab.c: $(SRCDIR)%.y

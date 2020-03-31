@@ -3,46 +3,44 @@
 
 #include "tools.hpp"
 
+#include <algorithm>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 class Node {
 	public:
 		/* Constructors */
 		Node() {}
 
+		/* Fields */
+		int line = 0, column = 0;
+
 		/* Methods */
 		virtual std::string to_string() const = 0;
+		// virtual std::string type() const = 0;
 };
 
 template <typename T>
-class List: public Node {
+class List: public std::vector<T*> {
 	public:
-		/* Constructors */
-		List() {}
-		List(std::vector<T*> stack): stack(stack) {}
-
-		/* Fields */
-		std::vector<T*> stack;
-
 		/* Methods */
-		List& push(Node* t) { if (t) stack.push_back(static_cast<T*>(t)); return *this; }
-
-		virtual std::string to_string() const {
-			if (stack.empty())
-				return "[]";
-
-			std::string s = stack.back()->to_string();
-
-			for (auto it = stack.rbegin() + 1; it != stack.rend(); ++it)
-				s += "," + (*it)->to_string();
-
-			return "[" + s + "]";
+		List& add(T* t) {
+			this->push_back(t);
+			return *this;
 		}
 
-		/* Accessors */
-		size_t size() const { return stack.size(); }
-		const T* back() const { return stack.back(); }
+		std::string to_string() const {
+			if (this->empty())
+				return "[]";
+
+			std::string str = "[" + this->front()->to_string();
+
+			for (auto it = this->begin() + 1; it != this->end(); ++it)
+				str += "," + (*it)->to_string();
+
+			return str + "]";
+		}
 };
 
 class Expr: public Node {};
@@ -50,8 +48,9 @@ class Expr: public Node {};
 class Block: public Expr {
 	public:
 		/* Constructors */
-		Block() {}
-		Block(const List<Expr>& exprs): exprs(exprs) {}
+		Block(const List<Expr>& exprs): exprs(exprs) {
+			std::reverse(this->exprs.begin(), this->exprs.end());
+		}
 
 		/* Fields */
 		List<Expr> exprs;
@@ -59,9 +58,8 @@ class Block: public Expr {
 		/* Methods */
 		virtual std::string to_string() const {
 			if (exprs.size() == 1)
-				return exprs.back()->to_string();
-			else
-				return exprs.to_string();
+				return exprs.front()->to_string();
+			return exprs.to_string();
 		}
 };
 
@@ -78,10 +76,8 @@ class Field: public Node {
 		/* Methods */
 		virtual std::string to_string() const {
 			std::string str = "Field(" + name + "," + type;
-
 			if (init)
 				str += "," + init->to_string();
-
 			return str + ")";
 		}
 };
@@ -104,11 +100,16 @@ class Method: public Node {
 	public:
 		/* Constructors */
 		Method(const std::string& name, const List<Formal>& formals, const std::string& type, const Block& block):
-			name(name), formals(formals), type(type), block(block) {}
+			name(name), formals(formals), type(type), block(block) {
+				std::reverse(this->formals.begin(), this->formals.end());
+			}
 
 		/* Fields */
 		std::string name, type;
+
 		List<Formal> formals;
+		std::unordered_map<std::string, Formal*> formals_table;
+
 		Block block;
 
 		/* Methods */
@@ -126,12 +127,18 @@ class Class: public Node {
 	public:
 		/* Constructors */
 		Class(const std::string& name, const std::string& parent, const List<Field>& fields, const List<Method>& methods):
-			name(name), parent(parent), fields(fields), methods(methods) {}
+			name(name), parent(parent), fields(fields), methods(methods) {
+				std::reverse(this->fields.begin(), this->fields.end());
+				std::reverse(this->methods.begin(), this->methods.end());
+			}
 
 		/* Fields */
 		std::string name, parent;
+
 		List<Field> fields;
+		std::unordered_map<std::string, Field*> fields_table;
 		List<Method> methods;
+		std::unordered_map<std::string, Method*> methods_table;
 
 		/* Methods */
 		virtual std::string to_string() const {
@@ -139,11 +146,27 @@ class Class: public Node {
 		}
 };
 
+class Program: public Node {
+	public:
+		/* Constructors */
+		Program(const List<Class>& classes): classes(classes) {
+			std::reverse(this->classes.begin(), this->classes.end());
+		}
+
+		/* Fields */
+		List<Class> classes;
+		std::unordered_map<std::string, Class*> classes_table;
+
+		/* Methods */
+		virtual std::string to_string() const {
+			return classes.to_string();
+		}
+};
+
 class If: public Expr {
 	public:
 		/* Constructors */
-		If(Expr* cond, Expr* then, Expr* els):
-			cond(cond), then(then), els(els) {}
+		If(Expr* cond, Expr* then, Expr* els): cond(cond), then(then), els(els) {}
 
 		/* Fields */
 		Expr* cond, * then, * els;
@@ -151,10 +174,8 @@ class If: public Expr {
 		/* Methods */
 		virtual std::string to_string() const {
 			std::string str = "If(" + cond->to_string() + "," + then->to_string();
-
 			if (els)
 				str += "," + els->to_string();
-
 			return str + ")";
 		}
 };
@@ -186,10 +207,8 @@ class Let: public Expr {
 		/* Methods */
 		virtual std::string to_string() const {
 			std::string str = "Let(" + name + "," + type + ",";
-
 			if (init)
 				str += init->to_string() + ",";
-
 			return str + scope->to_string() + ")";
 		}
 };
@@ -197,7 +216,7 @@ class Let: public Expr {
 class Assign: public Expr {
 	public:
 		/* Constructors */
-		Assign(const std::string& name, Expr* value):
+		Assign(std::string name, Expr* value):
 			name(name), value(value) {}
 
 		/* Fields */
@@ -223,15 +242,13 @@ class Unary: public Expr {
 
 		/* Methods */
 		virtual std::string to_string() const {
-			std::string op;
-
+			std::string str = "UnOp(";
 			switch (type) {
-				case NOT: op = "not"; break;
-				case MINUS: op = "-"; break;
-				case ISNULL: op = "isnull"; break;
+				case NOT: str += "not"; break;
+				case MINUS: str += "-"; break;
+				case ISNULL: str += "isnull"; break;
 			}
-
-			return "UnOp(" + op + "," + value->to_string() + ")";
+			return str + "," + value->to_string() + ")";
 		}
 };
 
@@ -248,21 +265,19 @@ class Binary: public Expr {
 
 		/* Methods */
 		virtual std::string to_string() const {
-			std::string op;
-
+			std::string str = "BinOp(";
 			switch (type) {
-				case AND: op = "and"; break;
-				case EQUAL: op = "="; break;
-				case LOWER: op = "<"; break;
-				case LOWER_EQUAL: op = "<="; break;
-				case PLUS: op = "+"; break;
-				case MINUS: op = "-"; break;
-				case TIMES: op = "*"; break;
-				case DIV: op = "/"; break;
-				case POW: op = "^"; break;
+				case AND: str += "and"; break;
+				case EQUAL: str += "="; break;
+				case LOWER: str += "<"; break;
+				case LOWER_EQUAL: str += "<="; break;
+				case PLUS: str += "+"; break;
+				case MINUS: str += "-"; break;
+				case TIMES: str += "*"; break;
+				case DIV: str += "/"; break;
+				case POW: str += "^"; break;
 			}
-
-			return "BinOp(" + op + "," + left->to_string() + "," + right->to_string() + ")";
+			return str + "," + left->to_string() + "," + right->to_string() + ")";
 		}
 };
 
@@ -270,18 +285,18 @@ class Call: public Expr {
 	public:
 		/* Constructors */
 		Call(Expr* scope, const std::string& name, const List<Expr>& args):
-			scope(scope), name(name), args(args) {}
+			scope(scope), name(name), args(args) {
+				std::reverse(this->args.begin(), this->args.end());
+			}
 
 		/* Fields */
-		Node* scope;
+		Expr* scope;
 		std::string name;
 		List<Expr> args;
 
 		/* Methods */
 		virtual std::string to_string() const {
-			std::string str = "Call(";
-			str += scope ? scope->to_string() : "self";
-			return str + "," + name + "," + args.to_string() + ")";
+			return "Call(" + scope->to_string() + "," + name + "," + args.to_string() + ")";
 		}
 };
 
@@ -338,7 +353,6 @@ class String: public Expr {
 		/* Methods */
 		virtual std::string to_string() const {
 			std::string temp;
-
 			for (const char& c: str)
 				switch (c) {
 					case '\"':
@@ -349,7 +363,6 @@ class String: public Expr {
 						else
 							temp += char2hex(c);
 				}
-
 			return "\"" + temp + "\"";
 		}
 };

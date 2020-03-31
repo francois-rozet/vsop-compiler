@@ -8,11 +8,13 @@
 	#include <vector>
 	#include <unordered_map>
 
+	/* bison global variables */
+	extern int yymode;
+
 	/* bison global functions */
 	extern int yyerror(const std::string&);
 
 	/* flex global variables */
-	int yymode;
 	std::string yybuffer;
 	std::vector<YYLTYPE> yystack;
 
@@ -97,10 +99,14 @@ single_line_comment			"//"[^\0\n]*
 %%
 
 %{
-	if (yymode) {
-		int temp = yymode;
-		yymode = 0;
-		return temp;
+	switch(yymode) {
+		case START_LEXER:
+			yymode = 0;
+			return START_LEXER;
+		case START_PARSER:
+			yymode = 0;
+			return START_PARSER;
+		default: break;
 	}
 %}
 
