@@ -14,7 +14,7 @@
 class Node;
 class Program;
 
-/* Declarations */
+/************************/
 
 struct Error {
 	Node* node;
@@ -211,6 +211,25 @@ struct Declaration {
 	List<Method> methods;
 };
 
+class Class;
+
+class Program {
+	public:
+		/* Constructors */
+		Program(const List<Class>& classes): classes(classes) {
+			std::reverse(this->classes.begin(), this->classes.end());
+		}
+
+		/* Fields */
+		List<Class> classes;
+		std::unordered_map<std::string, Class*> classes_table;
+
+		/* Methods */
+		std::string to_string() const {
+			return classes.to_string();
+		}
+};
+
 class Class: public Node {
 	public:
 		/* Constructors */
@@ -234,10 +253,12 @@ class Class: public Node {
 		}
 
 		virtual void check(Program* p, std::unordered_map<std::string, std::string> scope, std::vector<Error>& errors) {
-			for (Field* f: fields) {
+			for (Field* f: fields)
 				f->check(p, scope, errors);
-				scope[f->name] = f->type;
-			}
+
+			for (Class* c = this; c->name != "Object"; c = p->classes_table[c->parent])
+				for (Field* f: c->fields)
+					scope[f->name] = f->type;
 
 			scope["self"] = name;
 
@@ -247,32 +268,6 @@ class Class: public Node {
 
 		virtual std::string get_type(Program* p, std::unordered_map<std::string, std::string> scope) {
 			return name;
-		}
-};
-
-class Program: public Node {
-	public:
-		/* Constructors */
-		Program(const List<Class>& classes): classes(classes) {
-			std::reverse(this->classes.begin(), this->classes.end());
-		}
-
-		/* Fields */
-		List<Class> classes;
-		std::unordered_map<std::string, Class*> classes_table;
-
-		/* Methods */
-		virtual std::string to_string() const {
-			return classes.to_string();
-		}
-
-		virtual void check(Program* p, std::unordered_map<std::string, std::string> scope, std::vector<Error>& errors) {
-			for (Class* c: classes)
-				c->check(p, scope, errors);
-		}
-
-		virtual std::string get_type(Program* p, std::unordered_map<std::string, std::string> scope) {
-			return "error";
 		}
 };
 
@@ -464,10 +459,10 @@ class Unary: public Expr {
 			switch (type) {
 				case NOT: expected = "bool"; break;
 				case MINUS: expected = "int32"; break;
-				case ISNULL: expected = "int32"; break;
+				case ISNULL: break;
 			}
 
-			if (value->get_type(p, scope) != expected)
+			if (not expected.empty() and value->get_type(p, scope) != expected)
 				errors.push_back({this, "expected type " + expected + ", but got type " + value->get_type(p, scope)});
 
 			this->get_type(p, scope);

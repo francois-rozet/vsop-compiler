@@ -237,7 +237,8 @@ int checker(char* filename) {
 
 	vector<Error> errors;
 
-	p->check(p, {}, errors);
+	for (Class* c: p->classes)
+		c->check(p, {}, errors);
 
 	for (Error& e: errors) {
 		yyrelocate(e.node);
