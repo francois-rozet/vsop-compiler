@@ -63,7 +63,8 @@
 		{"then", THEN},
 		{"true", TRUE},
 		{"unit", UNIT},
-		{"while", WHILE}
+		{"while", WHILE},
+		{"self", SELF}
 	};
 %}
 

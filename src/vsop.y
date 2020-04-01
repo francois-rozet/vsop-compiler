@@ -39,7 +39,7 @@
 %{
 	/* main gloabl variables */
 	extern int yymode;
-	extern List<Class> yyprogram;
+	extern List<Class> yyclasses;
 
 	/* flex global variables */
 	extern FILE* yyin;
@@ -89,6 +89,7 @@
 %token <id> TRUE "true"
 %token <id> UNIT "unit"
 %token <id> WHILE "while"
+%token <id> SELF "self"
 
 %token <id> LBRACE "{"
 %token <id> RBRACE "}"
@@ -147,17 +148,19 @@ token:			/* */
 				{ yyprint("string-literal," + String($2).to_string());  }
 				| token TYPE_IDENTIFIER
 				{ yyprint("type-identifier," + std::string($2)); }
-				| token OBJECT_IDENTIFIER
-				{ yyprint("object-identifier," + std::string($2)); }
+				| token object
+				{ yyprint("object-identifier," + std::string($<id>2)); }
 				| token keyword
 				{ yyprint($<id>2); };
+
+object:			OBJECT_IDENTIFIER | "self";
 
 keyword:		"and" | "bool" | "class" | "do" | "else" | "extends" | "false" | "if" | "in" | "int32" | "isnull" | "let" | "new" | "not" | "string" | "then" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "<" | "<=" | "<-";
 
 program:		class
-				{ yyprogram.add($1); }
+				{ yyclasses.add($1); }
 				| class program
-				{ yyprogram.add($1); }
+				{ yyclasses.add($1); }
 				| error
 				{ yyerrok; }
 				| error program
@@ -274,7 +277,9 @@ expr-aux:		if
 				| "(" expr ")"
 				{ $$ = $2; }
 				| block
-				{ $$ = new Block(*$1); };
+				{ $$ = new Block(*$1); }
+				| "self"
+				{ $$ = new Self(); };
 
 if:				"if" expr "then" expr
 				{ $$ = new If($2, $4, NULL); }
@@ -329,7 +334,7 @@ literal:		INTEGER_LITERAL
 call:			expr "." object_id args
 				{ $$ = new Call($1, $3, *$4); }
 				| object_id args
-				{ $$ = new Call(new Identifier("self"), $1, *$2); };
+				{ $$ = new Call(new Self(), $1, *$2); };
 
 args:			"(" ")"
 				{ $$ = new List<Expr>(); }
