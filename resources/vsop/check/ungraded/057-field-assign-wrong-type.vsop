@@ -1,0 +1,4 @@
+class MyClass {
+    myField : bool <- let i : int32 in i <- 42;
+}
+class Main { main() : int32 { 0 } }

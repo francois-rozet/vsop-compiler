@@ -1,0 +1,6 @@
+class MyClass {
+    b() : bool { true }
+    i : int32;
+    b() : bool { true } (* error: redefinition of b() *)
+}
+class Main { main() : int32 { 0 } }

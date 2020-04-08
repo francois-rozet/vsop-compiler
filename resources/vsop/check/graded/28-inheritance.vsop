@@ -1,0 +1,26 @@
+class GrandParent {
+    answer : int32 <- 42;
+
+    b(a : bool, b : bool) : bool { not (not a and not b) }
+}
+
+class Parent extends GrandParent {
+    j : int32 <- 624;
+
+    evil() : int32 { answer + j } // New method
+    b(a : bool, b : bool) : bool { // Overridden method
+        not (a and b) and not (not a and not b)
+    }
+}
+
+class Child extends Parent {
+    m() : int32 {
+        if b(true, false) // Should access Parent.b()
+            then answer // Can access parent fields
+            else evil() // Can access parent methods
+    }
+}
+
+class Main {
+    main() : int32 { (new Child).m() }
+}

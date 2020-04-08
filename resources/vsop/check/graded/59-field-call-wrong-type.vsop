@@ -1,0 +1,7 @@
+class A {
+    needsTwoArgs(i : int32, b : bool) : int32 { if b then i else 42 }
+}
+class MyClass {
+    myField : unit <- (new A).needsTwoArgs(666, false);
+}
+class Main { main() : int32 { 0 } }

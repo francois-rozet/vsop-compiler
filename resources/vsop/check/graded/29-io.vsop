@@ -1,0 +1,12 @@
+class Main {
+    main() : int32 {
+        print("Testing I/O methods from Object\n");
+        print("Enter a boolean\n");
+        let b : bool <- inputBool() in printBool(b).print("\n");
+        print("Enter an integer\n");
+        let i : int32 <- inputInt32() in printInt32(i).print("\n");
+        print("Enter a string\n");
+        let s : string <- inputLine() in print(s).print("\n");
+        0
+    }
+}

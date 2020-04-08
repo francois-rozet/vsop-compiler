@@ -1,0 +1,9 @@
+class MyClass {
+    myMethod() : int32 {
+        if (let x : UndefType in true) then 42
+        else 0
+    }
+}
+class Main {
+    main() : int32 { 0 }
+}

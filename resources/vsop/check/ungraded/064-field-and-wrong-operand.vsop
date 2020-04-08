@@ -1,0 +1,4 @@
+class MyClass {
+    myField : bool <- false and 0;
+}
+class Main { main() : int32 { 0 } }

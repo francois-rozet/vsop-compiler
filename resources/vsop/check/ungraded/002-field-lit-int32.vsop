@@ -1,0 +1,4 @@
+class MyClass {
+    myField : int32 <- 42;
+}
+class Main { main() : int32 { 0 } }

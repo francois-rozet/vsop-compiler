@@ -1,0 +1,5 @@
+class A { }
+class MyClass {
+    myField : bool <- (new A) = (new A);
+}
+class Main { main() : int32 { 0 } }

@@ -1,0 +1,26 @@
+(* This class abuses shadowing to obscure the code, but is correct VSOP code *)
+class Main extends Object {
+    aName : bool;
+
+    someMethod(aName : int32) : unit {
+        printInt32(aName); // Uses the argument, not the field
+        let aName : string <- "\n"
+        in print(aName); // Uses the local variable, not the argument
+        aName <- 42; // Use the argument again
+        ()
+    }
+
+    main() : int32 {
+        if not aName // Uses the field
+            then
+                let aName : int32
+                in { aName <- 42; // Uses the local variable
+                     let aName : string <- "hello"
+                     in print(aName); // Uses the second local variable
+                     aName <- 0 // Uses the first local variable again
+                   }
+            else
+                someMethod(42);
+        0
+    }
+}

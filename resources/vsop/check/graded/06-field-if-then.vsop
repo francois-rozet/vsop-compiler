@@ -1,0 +1,4 @@
+class MyClass {
+    myField : unit <- if true then ();
+}
+class Main { main() : int32 { 0 } }

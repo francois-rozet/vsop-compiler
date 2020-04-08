@@ -1,0 +1,4 @@
+class MyClass {
+    myMethod(c : bool) : unit { if c then () }
+}
+class Main { main() : int32 { 0 } }

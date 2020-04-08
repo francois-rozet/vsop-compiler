@@ -1,0 +1,6 @@
+class MyClass {
+    myField : UndefinedClass;
+}
+class Main {
+    main() : int32 { 0 }
+}

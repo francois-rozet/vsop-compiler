@@ -1,0 +1,7 @@
+class Parent {
+    s : string;
+}
+class Child extends Parent {
+    myField : int32 <- s;
+}
+class Main { main() : int32 { 0 } }

@@ -1,0 +1,4 @@
+class MyClass {
+    myMethod(obj : Object) : bool { isnull obj }
+}
+class Main { main() : int32 { 0 } }

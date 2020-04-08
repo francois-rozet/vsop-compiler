@@ -1,0 +1,4 @@
+class MyClass {
+    veryUseful : unit <- ();
+}
+class Main { main() : int32 { 0 } }

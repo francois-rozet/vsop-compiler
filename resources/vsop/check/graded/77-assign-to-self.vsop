@@ -1,0 +1,6 @@
+class Main {
+    main() : int32 {
+        self <- new Main;
+        0
+    }
+}

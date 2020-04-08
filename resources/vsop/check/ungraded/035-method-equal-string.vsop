@@ -1,0 +1,4 @@
+class MyClass {
+    myMethod(s : string) : bool { s = "singleton" }
+}
+class Main { main() : int32 { 0 } }

@@ -1,0 +1,12 @@
+class MyClass {
+    myMethod() : unit {
+        print("In myMethod()");
+        let x : Object <-
+            if (inputInt32() = 42) then new UndefType
+            else new Object in
+        ()
+    }
+}
+class Main {
+    main() : int32 { 0 }
+}

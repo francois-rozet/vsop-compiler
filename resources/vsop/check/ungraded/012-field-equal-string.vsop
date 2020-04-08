@@ -1,0 +1,4 @@
+class MyClass {
+    myField : bool <- "singleton" = "singleton";
+}
+class Main { main() : int32 { 0 } }

@@ -1,0 +1,5 @@
+class MyClass {
+    (* if-then without else returns () *)
+    myMethod(c : bool) : bool { () = if c then 42 }
+}
+class Main { main() : int32 { 0 } }
