@@ -2,6 +2,7 @@
 #include "tools.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <stdexcept>
 
 using namespace std;
@@ -141,15 +142,13 @@ Scope& Method::decrease(Scope& s) const {
 	return formals.decrease(s);
 }
 
-void Method::redefinition(vector<Error>& errors) {
-	for (auto it = formals.begin(); it != formals.end();)
-		if (formals_table.find((*it)->name) == formals_table.end()) {
+void Method::augment(vector<Error>& errors) {
+	for (auto it = formals.begin(); it != formals.end(); ++it)
+		if (formals_table.find((*it)->name) != formals_table.end()) {
+			errors.push_back({*it, "redefinition of formal " + (*it)->name});
+			it = prev(formals.erase(it));
+		} else
 			formals_table[(*it)->name] = *it;
-			++it;
-		} else {
-			errors.push_back({*it, "redefinition of formal " + (*it)->name + " of method " + name});
-			it = formals.erase(it);
-		}
 }
 
 void Method::check(Program* p, Scope& s, vector<Error>& errors) {
@@ -186,89 +185,60 @@ string Class::to_string() const {
 }
 
 Scope& Class::increase(Scope& s) const {
-	fields.increase(s);
-	if (parent)
-		parent->increase(s);
+	for (auto it = fields_table.begin(); it != fields_table.end(); ++it)
+		it->second->increase(s);
 	return s.push("self", name);
 }
 
 Scope& Class::decrease(Scope& s) const {
-	s.pop("self");
-	if (parent)
-		parent->decrease(s);
-	return fields.decrease(s);
+	for (auto it = fields_table.begin(); it != fields_table.end(); ++it)
+		it->second->decrease(s);
+	return s.pop("self");
 }
 
-void Class::redefinition(vector<Error>& errors) {
-	for (auto it = fields.begin(); it != fields.end();)
-		if (fields_table.find((*it)->name) == fields_table.end()) {
-			fields_table[(*it)->name] = *it;
-			++it;
-		} else {
-			errors.push_back({*it, "redefinition of field " + (*it)->name + " of class " + name});
-			it = fields.erase(it);
-		}
-
-	for (auto it = methods.begin(); it != methods.end();)
-		if (methods_table.find((*it)->name) == methods_table.end()) {
-			methods_table[(*it)->name] = *it;
-			(*it)->redefinition(errors);
-			++it;
-		} else {
-			errors.push_back({*it, "redefinition of method " + (*it)->name + " of class " + name});
-			it = methods.erase(it);
-		}
-}
-
-void Class::override(vector<Error>& errors) {
-	for (auto it = fields.begin(); it != fields.end();) {
-		Class* ancestor = parent;
-
-		for (; ancestor != NULL; ancestor = ancestor->parent)
-			if (ancestor->fields_table.find((*it)->name) != ancestor->fields_table.end())
-				break;
-
-		if (ancestor == NULL)
-			++it;
-		else {
+void Class::augment(vector<Error>& errors) {
+	// Fields
+	for (auto it = fields.begin(); it != fields.end(); ++it)
+		if (fields_table.find((*it)->name) != fields_table.end()) {
+			errors.push_back({*it, "redefinition of field " + (*it)->name});
+			it = prev(fields.erase(it));
+		} else if (parent->fields_table.find((*it)->name) != parent->fields_table.end()) {
 			errors.push_back({*it, "overriding field " + (*it)->name});
-			fields_table.erase((*it)->name);
-			it = fields.erase(it);
-		}
-	}
+			it = prev(fields.erase(it));
+		} else
+			fields_table[(*it)->name] = *it;
 
-	for (auto it = methods.begin(); it != methods.end();) {
-		Class* ancestor = parent;
+	fields_table.insert(parent->fields_table.begin(), parent->fields_table.end());
 
-		for (; ancestor != NULL; ancestor = ancestor->parent) {
-			if (ancestor->methods_table.find((*it)->name) == ancestor->methods_table.end())
-				continue;
+	// Methods
+	for (Method* m: methods)
+		m->augment(errors);
 
-			Method* m = ancestor->methods_table[(*it)->name];
+	for (auto it = methods.begin(); it != methods.end(); ++it)
+		if (methods_table.find((*it)->name) != methods_table.end()) {
+			errors.push_back({*it, "redefinition of method " + (*it)->name});
+			it = prev(methods.erase(it));
+		} else if (parent->methods_table.find((*it)->name) != parent->methods_table.end()) {
+			Method* m = parent->methods_table[(*it)->name];
 
-			if ((*it)->type != m->type) // different return type
-				break;
-			else if ((*it)->formals.size() != m->formals.size()) // different number of formals
-				break;
-			else { // different formal types
-				int i = 0;
-				for (; i < (*it)->formals.size(); ++i)
-					if ((*it)->formals[i]->type != m->formals[i]->type)
-						break;
+			bool same = (*it)->type == m->type; // output type
+			same = same and (*it)->formals.size() == m->formals.size(); // number of formals
 
-				if (i < (*it)->formals.size())
-					break;
+			for (int i = 0; same and i < (*it)->formals.size(); ++i)
+				same = (*it)->formals[i]->type == m->formals[i]->type; // formal types
+
+			if (same)
+				methods_table[(*it)->name] = *it;
+			else {
+				errors.push_back({*it, "overriding method " + (*it)->name + " with different signature"});
+				it = prev(methods.erase(it));
 			}
-		}
+		} else
+			methods_table[(*it)->name] = *it;
 
-		if (ancestor == NULL)
-			++it;
-		else {
-			errors.push_back({*it, "overriding method " + (*it)->name + " with different signature"});
-			methods_table.erase((*it)->name);
-			it = methods.erase(it);
-		}
-	}
+	for (auto it = parent->methods_table.begin(); it != parent->methods_table.end(); ++it)
+		if (methods_table.find(it->first) == methods_table.end())
+			methods_table[it->first] = it->second;
 }
 
 void Class::check(Program* p, Scope& s, vector<Error>& errors) {
@@ -288,8 +258,16 @@ string Class::get_type(Program* p, Scope& s) const {
 /* Constructors */
 Program::Program(const List<Class>& classes): classes(classes) {
 	reverse(this->classes.begin(), this->classes.end());
+}
 
-	Class* object = new Class("Object", "Object", {},
+/* Methods */
+string Program::to_string() const {
+	return classes.to_string();
+}
+
+void Program::augment(vector<Error>& errors) {
+	// Object
+	classes_table["Object"] = new Class("Object", "Object", {},
 		List<Method>({
 			new Method("print", {new Formal("s", "string")}, "Object", Block()),
 			new Method("printBool", {new Formal("b", "bool")}, "Object", Block()),
@@ -300,73 +278,48 @@ Program::Program(const List<Class>& classes): classes(classes) {
 		})
 	);
 
-	for (Method* m: object->methods)
-		object->methods_table[m->name] = m;
+	for (Method* m: classes_table["Object"]->methods)
+		classes_table["Object"]->methods_table[m->name] = m;
 
-	classes_table["Object"] = object;
-}
+	// Redefinition and overriding
+	int size;
 
-/* Methods */
-string Program::to_string() const {
-	return classes.to_string();
-}
+	do {
+		size = classes_table.size();
 
-void Program::redefinition(vector<Error>& errors) {
-	for (auto it = classes.begin(); it != classes.end();)
-		if (classes_table.find((*it)->name) == classes_table.end()) {
-			classes_table[(*it)->name] = *it;
-			(*it)->redefinition(errors);
-			++it;
-		} else {
-			errors.push_back({*it, "redefinition of class " + (*it)->name});
-			it = classes.erase(it);
+		for (auto it = classes.begin(); it != classes.end(); ++it)
+			if ((*it)->parent)
+				continue;
+			else if (classes_table.find((*it)->name) != classes_table.end()) {
+				errors.push_back({*it, "redefinition of class " + (*it)->name});
+				it = prev(classes.erase(it));
+			} else if (classes_table.find((*it)->parent_name) != classes_table.end()) {
+				classes_table[(*it)->name] = *it;
+				(*it)->parent = classes_table[(*it)->parent_name];
+				(*it)->augment(errors);
+			}
+
+	} while (size < classes_table.size());
+
+	for (auto it = classes.begin(); it != classes.end(); ++it)
+		if (not (*it)->parent) {
+			errors.push_back({*it, "class " + (*it)->name + " cannot extend class " + (*it)->parent_name});
+			it = prev(classes.erase(it));
 		}
-}
 
-void Program::inheritance(vector<Error>& errors) {
-	unordered_set<string> genealogy;
-
-	for (auto it = classes.begin(); it != classes.end(); genealogy.clear()) {
-		Class* c = *it;
-
-		for (; c->name != "Object"; c = classes_table[c->parent_name])
-			if (genealogy.find(c->name) != genealogy.end())
-				break;
-			else if (classes_table.find(c->parent_name) == classes_table.end())
-				break;
-			else
-				genealogy.insert(c->name);
-
-		if (c->name == "Object") {
-			(*it)->parent = classes_table[(*it)->parent_name];
-			++it;
-		} else {
-			errors.push_back({*it, "class " + (*it)->name + " cannot extend class " + c->parent_name});
-			classes_table.erase((*it)->name);
-			it = classes.erase(it);
-		}
-	}
-}
-
-void Program::override(vector<Error>& errors) {
-	for (Class* c: classes)
-		c->override(errors);
-}
-
-void Program::main(vector<Error>& errors) {
+	// Main
 	if (classes_table.find("Main") == classes_table.end())
 		errors.push_back({this, "undefined class Main"});
 	else {
-		Class* main = classes_table["Main"];
+		Class* c = classes_table["Main"];
 
-		if (main->methods_table.find("main") == main->methods_table.end())
-			errors.push_back({main, "undefined method main"});
+		if (c->methods_table.find("main") == c->methods_table.end())
+			errors.push_back({c, "undefined method main"});
 		else {
-			bool cond = main->methods_table["main"]->formals.size() > 0;
-			cond = cond or main->methods_table["main"]->type != "int32";
+			Method* m = c->methods_table["main"];
 
-			if (cond)
-				errors.push_back({main, "main method of class Main defined with wrong signature"});
+			if (m->formals.size() > 0 or m->type != "int32")
+				errors.push_back({m, "main method of class Main defined with wrong signature"});
 		}
 	}
 }
@@ -625,11 +578,7 @@ void Call::check_aux(Program* p, Scope& s, vector<Error>& errors) {
 	if (AST::is_class(p, scope_t)) {
 		Class* c = p->classes_table[scope_t];
 
-		for (; c != NULL; c = c->parent)
-			if (c->methods_table.find(name) != c->methods_table.end())
-				break;
-
-		if (c == NULL)
+		if (c->methods_table.find(name) == c->methods_table.end())
 			errors.push_back({this, "unknown method " + name});
 		else {
 			Method* m = c->methods_table[name];
@@ -651,11 +600,7 @@ string Call::get_type(Program* p, Scope& s) const {
 	if (AST::is_class(p, scope_t)) {
 		Class* c = p->classes_table[scope_t];
 
-		for (; c != NULL; c = c->parent)
-			if (c->methods_table.find(name) != c->methods_table.end())
-				break;
-
-		if (c != NULL)
+		if (c->methods_table.find(name) != c->methods_table.end())
 			return c->methods_table[name]->type;
 	}
 

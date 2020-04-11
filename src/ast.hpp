@@ -172,7 +172,7 @@ class Method: public Node {
 		virtual std::string to_string() const;
 		virtual Scope& increase(Scope&) const;
 		virtual Scope& decrease(Scope&) const;
-		void redefinition(std::vector<Error>&);
+		void augment(std::vector<Error>&);
 		virtual void check(Program*, Scope&, std::vector<Error>&);
 		virtual std::string get_type(Program*, Scope&) const;
 };
@@ -202,8 +202,7 @@ class Class: public Node {
 
 		virtual Scope& increase(Scope&) const;
 		virtual Scope& decrease(Scope&) const;
-		void redefinition(std::vector<Error>&);
-		void override(std::vector<Error>&);
+		void augment(std::vector<Error>&);
 		virtual void check(Program*, Scope&, std::vector<Error>&);
 		virtual std::string get_type(Program*, Scope&) const;
 };
@@ -219,10 +218,7 @@ class Program: public Node {
 
 		/* Methods */
 		virtual std::string to_string() const;
-		void redefinition(std::vector<Error>&);
-		void inheritance(std::vector<Error>&);
-		void override(std::vector<Error>&);
-		void main(std::vector<Error>&);
+		void augment(std::vector<Error>&);
 		virtual void check(Program*, Scope&, std::vector<Error>&);
 };
 

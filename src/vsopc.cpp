@@ -22,56 +22,38 @@ extern void yyerror(const string&);
 extern bool yyopen(char*);
 extern void yyclose();
 
-int lexer(char* filename) {
-	if (not yyopen(filename))
-		return 1;
-
+int lexer() {
 	yymode = START_LEXER;
 	yyparse();
 
-	yyclose();
-	return yyerrs;
+	return 0;
 }
 
-int parser(char* filename) {
-	if (not yyopen(filename))
-		return 1;
-
+int parser() {
 	yymode = START_PARSER;
 	yyparse();
 
-	if (yyclasses.empty()) {
-		yyclose();
-		return yyerrs;
-	}
+	if (yyclasses.empty())
+		return 1;
 
 	Program program = Program(yyclasses);
 	cout << program.to_string() << endl;
 
-	yyclose();
-	return yyerrs;
+	return 0;
 }
 
-int checker(char* filename) {
-	if (not yyopen(filename))
-		return 1;
-
+int checker() {
 	yymode = START_PARSER;
 	yyparse();
 
-	if (yyclasses.empty()) {
-		yyclose();
-		return yyerrs;
-	}
+	if (yyclasses.empty())
+		return 1;
 
 	Program program = Program(yyclasses);
 	Scope scope;
 	vector<Error> errors;
 
-	program.redefinition(errors);
-	program.inheritance(errors);
-	program.override(errors);
-	program.main(errors);
+	program.augment(errors);
 	program.check(&program, scope, errors);
 
 	for (Error& e: errors) {
@@ -81,26 +63,30 @@ int checker(char* filename) {
 
 	cout << program.to_string() << endl;
 
-	yyclose();
-	return yyerrs;
+	return 0;
 }
 
 int main (int argc, char* argv[]) {
 	if (argc < 2)
 		return 0;
 	else if (argc < 3) {
-		cerr << "vsopc " << argv[1] << ": error: no input file" << std::endl;
+		cerr << "vsopc " << argv[1] << ": error: no input file" << endl;
+		return 1;
+	} else if (not yyopen(argv[2])) {
+		cerr << "vsopc: fatal-error: " << argv[2] << ": No such file or directory" << endl;
 		return 1;
 	}
 
 	string action = argv[1];
 
 	if (action == "-lex")
-		return lexer(argv[2]);
+		lexer();
 	else if (action == "-parse")
-		return parser(argv[2]);
+		parser();
 	else if (action == "-check")
-		return checker(argv[2]);
+		checker();
 
-	return 0;
+	yyclose();
+
+	return yyerrs;
 }
