@@ -51,7 +51,7 @@
 	int yylex(void);
 	int yyparse(void);
 	void yylocate(Node*, const YYLTYPE&);
-	void yyrelocate(const Node*);
+	void yyrelocate(int, int);
 	void yyrelocate(const YYLTYPE&);
 	void yyprint(const std::string&);
 	void yyerror(const std::string&);
@@ -167,7 +167,7 @@ program:		class
 				{ yyerrok; };
 
 class:			"class" type_id class-parent "{" class-aux
-				{ $$ = new Class($2, $3, $5->fields, $5->methods); yylocate($$, @$); };
+				{ $$ = new Class($2, $3, $5->fields, $5->methods); yylocate($$, @$); delete $5; };
 
 class-parent:	/* */
 				{ $$ = strdup("Object"); }
@@ -196,7 +196,7 @@ field:			object_id ":" type init ";"
 				{ $$ = new Field($1, $3, $4); yylocate($$, @$); };
 
 method:			object_id formals ":" type block
-				{ $$ = new Method($1, *$2, $4, Block(*$5)); yylocate($$, @$); };
+				{ $$ = new Method($1, *$2, $4, new Block(*$5)); yylocate($$, @$); delete $2; };
 
 formal:			object_id ":" type
 				{ $$ = new Formal($1, $3); yylocate($$, @$); };
@@ -277,7 +277,7 @@ expr-aux:		if
 				| "(" expr ")"
 				{ $$ = $2; }
 				| block
-				{ $$ = new Block(*$1); }
+				{ $$ = new Block(*$1); delete $1; }
 				| "self"
 				{ $$ = new Self(); };
 
@@ -332,9 +332,9 @@ literal:		INTEGER_LITERAL
 				{ $$ = new Boolean(false); };
 
 call:			expr "." object_id args
-				{ $$ = new Call($1, $3, *$4); }
+				{ $$ = new Call($1, $3, *$4); delete $4; }
 				| object_id args
-				{ $$ = new Call(new Self(), $1, *$2); };
+				{ $$ = new Call(new Self(), $1, *$2); delete $2; };
 
 args:			"(" ")"
 				{ $$ = new List<Expr>(); }
@@ -361,9 +361,9 @@ void yylocate(Node* n, const YYLTYPE& loc) {
 	n->column = loc.first_column;
 }
 
-void yyrelocate(const Node* n) {
-	yylloc.first_line = n->line;
-	yylloc.first_column = n->column;
+void yyrelocate(int line, int column) {
+	yylloc.first_line = line;
+	yylloc.first_column = column;
 }
 
 void yyrelocate(const YYLTYPE& loc) {

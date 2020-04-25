@@ -16,7 +16,7 @@ extern int yyerrs;
 
 /* bison global functions */
 extern int yyparse(void);
-extern void yyrelocate(const Node* n);
+extern void yyrelocate(int, int);
 extern void yyprint(const string&);
 extern void yyerror(const string&);
 extern bool yyopen(char*);
@@ -57,7 +57,7 @@ int checker() {
 	program.check(&program, scope, errors);
 
 	for (Error& e: errors) {
-		yyrelocate(e.node);
+		yyrelocate(e.line, e.column);
 		yyerror("semantic error, " + e.msg);
 	}
 

@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
+#include <memory>
 
 class Scope: std::unordered_map<std::string, std::vector<std::string>> {
 	public:
@@ -15,13 +16,13 @@ class Scope: std::unordered_map<std::string, std::vector<std::string>> {
 		const std::string& get(const std::string&) const;
 };
 
-class Node; // forward declaration
-class Program; // forward declaration
-
 struct Error {
-	Node* node;
+	int line;
+	int column;
 	std::string msg;
 };
+
+class Program; // forward declaration
 
 class Node {
 	public:
@@ -42,15 +43,18 @@ class Node {
 };
 
 template <typename T>
-class List: public std::vector<T*>, public Node {
+class List: public std::vector<std::shared_ptr<T>>, public Node {
 	public:
 		/* Constructors */
 		List() {}
-		List(std::initializer_list<T*> init): std::vector<T*>(init) {}
+		List(std::initializer_list<T*> init) {
+			for(T* t: init)
+				this->add(t);
+		}
 
 		/* Methods */
 		List& add(T* t) {
-			this->push_back(t);
+			this->push_back(std::shared_ptr<T>(t));
 			return *this;
 		}
 
@@ -67,19 +71,19 @@ class List: public std::vector<T*>, public Node {
 		}
 
 		virtual Scope& increase(Scope& s) const {
-			for (T* t: *this)
+			for (std::shared_ptr<T> t: *this)
 				t->increase(s);
 			return s;
 		}
 
 		virtual Scope& decrease(Scope& s) const {
-			for (T* t: *this)
+			for (std::shared_ptr<T> t: *this)
 				t->decrease(s);
 			return s;
 		}
 
 		virtual void check(Program* p, Scope& s, std::vector<Error>& errors) {
-			for (T* t: *this)
+			for (std::shared_ptr<T> t: *this)
 				t->check(p, s, errors);
 		}
 };
@@ -129,7 +133,7 @@ class Field: public Node {
 
 		/* Fields */
 		std::string name, type;
-		Expr* init;
+		std::shared_ptr<Expr> init;
 
 		/* Methods */
 		virtual std::string to_string() const;
@@ -158,15 +162,15 @@ class Formal: public Node {
 class Method: public Node {
 	public:
 		/* Constructors */
-		Method(const std::string&, const List<Formal>&, const std::string&, const Block&);
+		Method(const std::string&, const List<Formal>&, const std::string&, Block*);
 
 		/* Fields */
 		std::string name, type;
 
 		List<Formal> formals;
-		std::unordered_map<std::string, Formal*> formals_table;
+		std::unordered_map<std::string, std::shared_ptr<Formal>> formals_table;
 
-		Block block;
+		std::shared_ptr<Block> block;
 
 		/* Methods */
 		virtual std::string to_string() const;
@@ -191,11 +195,11 @@ class Class: public Node {
 		std::string name, parent_name;
 
 		List<Field> fields;
-		std::unordered_map<std::string, Field*> fields_table;
+		std::unordered_map<std::string, std::shared_ptr<Field>> fields_table;
 		List<Method> methods;
-		std::unordered_map<std::string, Method*> methods_table;
+		std::unordered_map<std::string, std::shared_ptr<Method>> methods_table;
 
-		Class* parent;
+		std::shared_ptr<Class> parent;
 
 		/* Methods */
 		virtual std::string to_string() const;
@@ -214,7 +218,7 @@ class Program: public Node {
 
 		/* Fields */
 		List<Class> classes;
-		std::unordered_map<std::string, Class*> classes_table;
+		std::unordered_map<std::string, std::shared_ptr<Class>> classes_table;
 
 		/* Methods */
 		virtual std::string to_string() const;
@@ -228,7 +232,7 @@ class If: public Expr {
 		If(Expr* cond, Expr* then, Expr* els): cond(cond), then(then), els(els) {}
 
 		/* Fields */
-		Expr* cond, * then, * els;
+		std::shared_ptr<Expr> cond, then, els;
 
 		/* Methods */
 		virtual std::string to_string_aux() const;
@@ -242,7 +246,7 @@ class While: public Expr {
 		While(Expr* cond, Expr* body): cond(cond), body(body) {}
 
 		/* Fields */
-		Expr* cond, * body;
+		std::shared_ptr<Expr> cond, body;
 
 		/* Methods */
 		virtual std::string to_string_aux() const;
@@ -258,7 +262,7 @@ class Let: public Expr {
 
 		/* Fields */
 		std::string name, type;
-		Expr* init, * scope;
+		std::shared_ptr<Expr> init, scope;
 
 		/* Methods */
 		virtual std::string to_string_aux() const;
@@ -275,7 +279,7 @@ class Assign: public Expr {
 
 		/* Fields */
 		std::string name;
-		Expr* value;
+		std::shared_ptr<Expr> value;
 
 		/* Methods */
 		virtual std::string to_string_aux() const;
@@ -292,7 +296,7 @@ class Unary: public Expr {
 
 		/* Fields */
 		Type type;
-		Expr* value;
+		std::shared_ptr<Expr> value;
 
 		/* Methods */
 		virtual std::string to_string_aux() const;
@@ -309,7 +313,7 @@ class Binary: public Expr {
 
 		/* Fields */
 		Type type;
-		Expr* left, * right;
+		std::shared_ptr<Expr> left, right;
 
 		/* Methods */
 		virtual std::string to_string_aux() const;
@@ -323,7 +327,7 @@ class Call: public Expr {
 		Call(Expr*, const std::string&, const List<Expr>&);
 
 		/* Fields */
-		Expr* scope;
+		std::shared_ptr<Expr> scope;
 		std::string name;
 		List<Expr> args;
 
@@ -424,7 +428,7 @@ namespace AST {
 
 	static bool conforms_to(Program* p, const std::string& a, const std::string& b) {
 		if (is_class(p, a))
-			for (Class* c = p->classes_table[a]; c != NULL; c = c->parent)
+			for (std::shared_ptr<Class> c = p->classes_table[a]; c != NULL; c = c->parent)
 				if (c->name == b)
 					return true;
 
@@ -432,8 +436,8 @@ namespace AST {
 	}
 
 	static std::string common_ancestor(Program* p, const std::string& a, const std::string& b) {
-		Class* c = p->classes_table[a];
-		Class* d = p->classes_table[b];
+		std::shared_ptr<Class> c = p->classes_table[a];
+		std::shared_ptr<Class> d = p->classes_table[b];
 
 		std::unordered_set<std::string> C;
 		std::unordered_set<std::string> D;
