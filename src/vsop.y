@@ -13,7 +13,7 @@
 	char* id;
 	List<Class>* classes;
 	Class* clas;
-	Declaration* decl;
+	Class::Definition* decl;
 	Field* field;
 	Method* method;
 	List<Formal>* formals;
@@ -143,9 +143,9 @@ start:			START_LEXER token
 
 token:			/* */
 				| token INTEGER_LITERAL
-				{ yyprint("integer-literal," + Integer($2).to_string()); }
+				{ yyprint("integer-literal," + Integer($2).to_string(false)); }
 				| token STRING_LITERAL
-				{ yyprint("string-literal," + String($2).to_string());  }
+				{ yyprint("string-literal," + String($2).to_string(false));  }
 				| token TYPE_IDENTIFIER
 				{ yyprint("type-identifier," + std::string($2)); }
 				| token object
@@ -175,19 +175,19 @@ class-parent:	/* */
 				{ $$ = $2; };
 
 class-aux:		"}"
-				{ $$ = new Declaration(); }
+				{ $$ = new Class::Definition(); }
 				| field class-aux
 				{ $2->fields.add($1); $$ = $2;	}
 				| method class-aux
 				{ $2->methods.add($1); $$ = $2;	}
 				| error "}"
-				{ $$ = new Declaration(); yyerrok; }
+				{ $$ = new Class::Definition(); yyerrok; }
 				| error ";" class-aux
 				{ $$ = $3; yyerrok; }
 				| error block class-aux /* prevent unmatched { */
 				{ $$ = $3; yyerrok; }
 				| error END
-				{ $$ = new Declaration();
+				{ $$ = new Class::Definition();
 					yyrelocate(@$);
 					yyerror("syntax error, unexpected end-of-file, missing ending } of class declaration");
 				};

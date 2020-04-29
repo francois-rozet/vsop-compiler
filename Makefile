@@ -5,7 +5,7 @@ SRCDIR = src/
 BINDIR = bin/
 EXT = cpp
 
-CXX = g++
+CXX = clang++
 CXXFLAGS = -std=c++14 -O3
 
 # Source files
@@ -16,7 +16,7 @@ OBJS = $(patsubst $(SRCDIR)%.$(EXT), $(BINDIR)%.o, $(SRCS))
 all: $(ALL)
 
 $(ALL): %c: $(SRCDIR)%.yy.c $(SRCDIR)%.tab.c $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) `llvm-config --cxxflags --ldflags --libs` -o $@ $^
 
 $(SRCDIR)%.tab.c: $(SRCDIR)%.y
 	bison -o $@ -d $^
@@ -26,7 +26,7 @@ $(SRCDIR)%.yy.c: $(SRCDIR)%.lex
 
 $(BINDIR)%.o: $(SRCDIR)%.$(EXT)
 	mkdir -p $(BINDIR)
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) `llvm-config --cxxflags --ldflags --libs` -c -o $@ $<
 
 # PHONY
 .PHONY: clean dist-clean install-tools
@@ -38,4 +38,4 @@ dist-clean: clean
 	rm -rf $(ALL)
 
 install-tools:
-	sudo apt install flex bison
+	sudo apt install flex bison llvm llvm-9 clang

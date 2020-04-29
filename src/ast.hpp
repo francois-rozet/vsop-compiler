@@ -1,19 +1,26 @@
 #ifndef AST_H
 #define AST_H
 
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+
 #include <string>
 #include <vector>
-#include <unordered_set>
 #include <unordered_map>
 #include <memory>
 
-class Scope: std::unordered_map<std::string, std::vector<std::string>> {
+class Scope: std::unordered_map<std::string, std::vector<llvm::Value*>> {
 	public:
 		/* Methods */
-		Scope& push(const std::string&, const std::string&);
+		Scope& push(const std::string&, llvm::Value*);
 		Scope& pop(const std::string&);
+		Scope& replace(const std::string&, llvm::Value*);
 		bool contains(const std::string&) const;
-		const std::string& get(const std::string&) const;
+		llvm::Value* get(const std::string&) const;
 };
 
 struct Error {
@@ -22,24 +29,26 @@ struct Error {
 	std::string msg;
 };
 
+struct LLVMHelper {
+	llvm::LLVMContext& context;
+	llvm::IRBuilder<>& builder;
+	llvm::Module& module;
+};
+
 class Program; // forward declaration
 
 class Node {
 	public:
 		/* Constructors */
 		Node() {}
+		virtual ~Node() {}
 
 		/* Fields */
 		int line = 1, column = 1;
 
 		/* Methods */
-		virtual std::string to_string() const = 0;
-
-		virtual Scope& increase(Scope& s) const { return s; }
-		virtual Scope& decrease(Scope& s) const { return s; }
-
-		virtual void check(Program*, Scope&, std::vector<Error>&) = 0;
-		virtual std::string get_type(Program*, Scope&) const { return "node"; };
+		virtual std::string to_string(bool) const = 0;
+		virtual void codegen(Program* p, LLVMHelper& h, Scope& s, std::vector<Error>& e) {}
 };
 
 template <typename T>
@@ -58,56 +67,37 @@ class List: public std::vector<std::shared_ptr<T>>, public Node {
 			return *this;
 		}
 
-		virtual std::string to_string() const {
+		virtual std::string to_string(bool with_type) const {
 			if (this->empty())
 				return "[]";
 
-			std::string str = "[" + this->front()->to_string();
+			std::string str = "[" + this->front()->to_string(with_type);
 
 			for (auto it = this->begin() + 1; it != this->end(); ++it)
-				str += "," + (*it)->to_string();
+				str += "," + (*it)->to_string(with_type);
 
 			return str + "]";
 		}
 
-		virtual Scope& increase(Scope& s) const {
+		virtual void codegen(Program* p, LLVMHelper& h, Scope& s, std::vector<Error>& errors) {
 			for (std::shared_ptr<T> t: *this)
-				t->increase(s);
-			return s;
-		}
-
-		virtual Scope& decrease(Scope& s) const {
-			for (std::shared_ptr<T> t: *this)
-				t->decrease(s);
-			return s;
-		}
-
-		virtual void check(Program* p, Scope& s, std::vector<Error>& errors) {
-			for (std::shared_ptr<T> t: *this)
-				t->check(p, s, errors);
+				t->codegen(p, h, s, errors);
 		}
 };
 
 class Expr: public Node {
 	public:
-		/* Methods */
-		virtual std::string to_string_aux() const = 0;
-		virtual std::string to_string() const {
-			std::string str = this->to_string_aux();
-			if (not type_.empty())
-				str += ":" + type_;
-			return str;
-		}
-
-		virtual void check_aux(Program* p, Scope& s, std::vector<Error>& errors) {}
-		virtual void check(Program* p, Scope& s, std::vector<Error>& errors) {
-			this->check_aux(p, s, errors);
-			type_ = this->get_type(p, s);
-		}
-
-	private:
 		/* Fields */
-		std::string type_;
+		llvm::Value* val;
+
+		/* Methods */
+		virtual std::string to_string_aux(bool) const = 0;
+		virtual std::string to_string(bool) const;
+
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&) = 0;
+		virtual void codegen(Program* p, LLVMHelper& h, Scope& s, std::vector<Error>& errors) {
+			val = this->codegen_aux(p, h, s, errors);
+		}
 };
 
 class Block: public Expr {
@@ -120,9 +110,8 @@ class Block: public Expr {
 		List<Expr> exprs;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class Field: public Node {
@@ -135,12 +124,21 @@ class Field: public Node {
 		std::string name, type;
 		std::shared_ptr<Expr> init;
 
+		llvm::Value* val;
+
+		unsigned idx;
+
 		/* Methods */
-		virtual std::string to_string() const;
-		virtual Scope& increase(Scope&) const;
-		virtual Scope& decrease(Scope&) const;
-		virtual void check(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string(bool) const;
+
+		llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
+		virtual void codegen(Program* p, LLVMHelper& h, Scope& s, std::vector<Error>& errors) {
+			val = this->codegen_aux(p, h, s, errors);
+		}
+
+		void declaration(LLVMHelper&, std::vector<Error>&);
+
+		llvm::Type* getType(LLVMHelper&) const;
 };
 
 class Formal: public Node {
@@ -152,12 +150,14 @@ class Formal: public Node {
 		std::string name, type;
 
 		/* Methods */
-		virtual std::string to_string() const;
-		virtual Scope& increase(Scope&) const;
-		virtual Scope& decrease(Scope&) const;
-		virtual void check(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string(bool) const;
+
+		void declaration(LLVMHelper&, std::vector<Error>&);
+
+		llvm::Type* getType(LLVMHelper&) const;
 };
+
+class Class; // forward declaration
 
 class Method: public Node {
 	public:
@@ -172,22 +172,28 @@ class Method: public Node {
 
 		std::shared_ptr<Block> block;
 
-		/* Methods */
-		virtual std::string to_string() const;
-		virtual Scope& increase(Scope&) const;
-		virtual Scope& decrease(Scope&) const;
-		void augment(std::vector<Error>&);
-		virtual void check(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
-};
+		Class* parent;
 
-struct Declaration {
-	List<Field> fields;
-	List<Method> methods;
+		unsigned idx;
+
+		/* Methods */
+		virtual std::string to_string(bool) const;
+		virtual void codegen(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
+
+		void declaration(LLVMHelper&, std::vector<Error>&);
+
+		std::string getName() const;
+		llvm::Function* getFunction(LLVMHelper&) const;
+		llvm::FunctionType* getType(LLVMHelper&) const;
 };
 
 class Class: public Node {
 	public:
+		struct Definition {
+			List<Field> fields;
+			List<Method> methods;
+		};
+
 		/* Constructors */
 		Class(const std::string&, const std::string&, const List<Field>&, const List<Method>&);
 
@@ -199,16 +205,17 @@ class Class: public Node {
 		List<Method> methods;
 		std::unordered_map<std::string, std::shared_ptr<Method>> methods_table;
 
-		std::shared_ptr<Class> parent;
+		Class* parent;
 
 		/* Methods */
-		virtual std::string to_string() const;
+		virtual std::string to_string(bool) const;
+		virtual void codegen(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 
-		virtual Scope& increase(Scope&) const;
-		virtual Scope& decrease(Scope&) const;
-		void augment(std::vector<Error>&);
-		virtual void check(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		void declaration(LLVMHelper&, std::vector<Error>&);
+
+		std::string getName() const;
+		bool isDeclared(LLVMHelper&) const;
+		llvm::StructType* getType(LLVMHelper&) const;
 };
 
 class Program: public Node {
@@ -221,23 +228,24 @@ class Program: public Node {
 		std::unordered_map<std::string, std::shared_ptr<Class>> classes_table;
 
 		/* Methods */
-		virtual std::string to_string() const;
-		void augment(std::vector<Error>&);
-		virtual void check(Program*, Scope&, std::vector<Error>&);
+		virtual std::string to_string(bool) const;
+		virtual void codegen(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
+
+		void declaration(LLVMHelper&, std::vector<Error>&);
 };
 
 class If: public Expr {
 	public:
 		/* Constructors */
 		If(Expr* cond, Expr* then, Expr* els): cond(cond), then(then), els(els) {}
+		If(std::shared_ptr<Expr> cond, std::shared_ptr<Expr> then, std::shared_ptr<Expr> els): cond(cond), then(then), els(els) {}
 
 		/* Fields */
 		std::shared_ptr<Expr> cond, then, els;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class While: public Expr {
@@ -249,9 +257,8 @@ class While: public Expr {
 		std::shared_ptr<Expr> cond, body;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class Let: public Expr {
@@ -265,11 +272,10 @@ class Let: public Expr {
 		std::shared_ptr<Expr> init, scope;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual Scope& increase(Scope&) const;
-		virtual Scope& decrease(Scope&) const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
+		Scope& associate(Scope&) const;
+		Scope& dissociate(Scope&) const;
 };
 
 class Assign: public Expr {
@@ -282,9 +288,8 @@ class Assign: public Expr {
 		std::shared_ptr<Expr> value;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class Unary: public Expr {
@@ -299,9 +304,8 @@ class Unary: public Expr {
 		std::shared_ptr<Expr> value;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class Binary: public Expr {
@@ -316,9 +320,8 @@ class Binary: public Expr {
 		std::shared_ptr<Expr> left, right;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class Call: public Expr {
@@ -332,9 +335,8 @@ class Call: public Expr {
 		List<Expr> args;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class New: public Expr {
@@ -346,9 +348,8 @@ class New: public Expr {
 		std::string type;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class Identifier: public Expr {
@@ -360,9 +361,8 @@ class Identifier: public Expr {
 		std::string id;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual void check_aux(Program*, Scope&, std::vector<Error>&);
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class Self: public Identifier {
@@ -380,8 +380,8 @@ class Integer: public Expr {
 		int value;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class String: public Expr {
@@ -393,8 +393,8 @@ class String: public Expr {
 		std::string str;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class Boolean: public Expr {
@@ -406,58 +406,15 @@ class Boolean: public Expr {
 		bool b;
 
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual std::string get_type(Program*, Scope&) const;
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 class Unit: public Expr {
 	public:
 		/* Methods */
-		virtual std::string to_string_aux() const;
-		virtual std::string get_type(Program*, Scope&) const;
-};
-
-namespace AST {
-	static bool is_class(Program* p, const std::string& type) {
-		return p->classes_table.find(type) != p->classes_table.end();
-	}
-
-	static bool is_primitive(Program* p, const std::string& type) {
-		return type == "int32" or type == "string" or type == "bool" or type == "unit";
-	}
-
-	static bool conforms_to(Program* p, const std::string& a, const std::string& b) {
-		if (is_class(p, a))
-			for (std::shared_ptr<Class> c = p->classes_table[a]; c != NULL; c = c->parent)
-				if (c->name == b)
-					return true;
-
-		return a == b;
-	}
-
-	static std::string common_ancestor(Program* p, const std::string& a, const std::string& b) {
-		std::shared_ptr<Class> c = p->classes_table[a];
-		std::shared_ptr<Class> d = p->classes_table[b];
-
-		std::unordered_set<std::string> C;
-		std::unordered_set<std::string> D;
-
-		while (c != NULL and d != NULL)
-			if (c->name == d->name)
-				return c->name;
-			else if (C.find(d->name) == C.end())
-				return d->name;
-			else if (D.find(c->name) == D.end())
-				return c->name;
-			else {
-				C.insert(c->name);
-				D.insert(d->name);
-				c = c->parent;
-				d = d->parent;
-			}
-
-		return "Object";
-	}
+		virtual std::string to_string_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
 #endif

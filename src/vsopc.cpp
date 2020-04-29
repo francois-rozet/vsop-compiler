@@ -1,5 +1,7 @@
 #include "vsop.tab.h"
 
+#include "llvm/Support/raw_os_ostream.h"
+
 #include <iostream>
 #include <string>
 #include <unordered_set>
@@ -10,6 +12,11 @@ using namespace std;
 /* global variables */
 int yymode;
 List<Class> yyclasses;
+Program* program;
+
+llvm::LLVMContext context;
+llvm::IRBuilder<> builder(context);
+llvm::Module module("VSOP", context);
 
 /* bison global variables */
 extern int yyerrs;
@@ -22,48 +29,35 @@ extern void yyerror(const string&);
 extern bool yyopen(char*);
 extern void yyclose();
 
-int lexer() {
+void lexer() {
 	yymode = START_LEXER;
 	yyparse();
-
-	return 0;
 }
 
-int parser() {
+void parser() {
 	yymode = START_PARSER;
 	yyparse();
 
-	if (yyclasses.empty())
-		return 1;
-
-	Program program = Program(yyclasses);
-	cout << program.to_string() << endl;
-
-	return 0;
+	program = new Program(yyclasses);
 }
 
-int checker() {
-	yymode = START_PARSER;
-	yyparse();
+void checker() {
+	LLVMHelper helper = {
+		context,
+		builder,
+		module
+	};
 
-	if (yyclasses.empty())
-		return 1;
-
-	Program program = Program(yyclasses);
 	Scope scope;
 	vector<Error> errors;
 
-	program.augment(errors);
-	program.check(&program, scope, errors);
+	program->declaration(helper, errors);
+	program->codegen(program, helper, scope, errors);
 
 	for (Error& e: errors) {
 		yyrelocate(e.line, e.column);
 		yyerror("semantic error, " + e.msg);
 	}
-
-	cout << program.to_string() << endl;
-
-	return 0;
 }
 
 int main (int argc, char* argv[]) {
@@ -77,14 +71,32 @@ int main (int argc, char* argv[]) {
 		return 1;
 	}
 
+	module.setSourceFileName(argv[2]);
+
 	string action = argv[1];
 
 	if (action == "-lex")
 		lexer();
-	else if (action == "-parse")
+	else {
 		parser();
-	else if (action == "-check")
-		checker();
+
+		if (action == "-parse")
+			cout << program->to_string(false) << endl;
+		else {
+			checker();
+
+			if (action == "-check")
+				cout << program->to_string(true) << endl;
+			else {
+				if (action == "-llvm") {
+					llvm::raw_os_ostream roo(cout);
+					roo << module;
+				}
+			}
+		}
+
+		delete program;
+	}
 
 	yyclose();
 
