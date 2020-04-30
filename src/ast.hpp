@@ -58,11 +58,11 @@ class List: public std::vector<std::shared_ptr<T>>, public Node {
 		List() {}
 		List(std::initializer_list<T*> init) {
 			for(T* t: init)
-				this->add(t);
+				this->push_back(std::shared_ptr<T>(t));
 		}
 		List(std::initializer_list<std::shared_ptr<T>> init) {
 			for(std::shared_ptr<T> t: init)
-				this->add(t);
+				this->push_back(t);
 		}
 
 		/* Methods */
@@ -70,7 +70,7 @@ class List: public std::vector<std::shared_ptr<T>>, public Node {
 			return this->add(std::shared_ptr<T>(t));
 		}
 		List& add(std::shared_ptr<T> t) {
-			this->push_back(t);
+			this->insert(this->begin(), t);
 			return *this;
 		}
 
@@ -105,13 +105,15 @@ class Expr: public Node {
 		virtual void codegen(Program* p, LLVMHelper& h, Scope& s, std::vector<Error>& errors) {
 			val = this->codegen_aux(p, h, s, errors);
 		}
+
+		virtual bool isSelf() const { return false; };
 };
 
 class Block: public Expr {
 	public:
 		/* Constructors */
 		Block() {}
-		Block(const List<Expr>&);
+		Block(const List<Expr>& exprs): exprs(exprs) {}
 
 		/* Fields */
 		List<Expr> exprs;
@@ -171,8 +173,10 @@ class Class; // forward declaration
 class Method: public Node {
 	public:
 		/* Constructors */
-		Method(const std::string&, const List<Formal>&, const std::string&, Block*);
-		Method(const std::string&, const List<Formal>&, const std::string&, std::shared_ptr<Block>);
+		Method(const std::string& name, const List<Formal>& formals, const std::string& type, Block* block):
+			name(name), formals(formals), type(type), block(block) {}
+		Method(const std::string& name, const List<Formal>& formals, const std::string& type, std::shared_ptr<Block> block):
+			name(name), formals(formals), type(type), block(block) {}
 
 		/* Fields */
 		std::string name, type;
@@ -205,7 +209,8 @@ class Class: public Node {
 		};
 
 		/* Constructors */
-		Class(const std::string&, const std::string&, const List<Field>&, const List<Method>&);
+		Class(const std::string& name, const std::string& parent, const List<Field>& fields, const List<Method>& methods):
+			name(name), parent_name(parent), fields(fields), methods(methods) {}
 
 		/* Fields */
 		std::string name, parent_name;
@@ -231,11 +236,16 @@ class Class: public Node {
 class Program: public Node {
 	public:
 		/* Constructors */
-		Program(const List<Class>&);
+		Program(const List<Class>& classes): classes(classes) {}
+		Program(const List<Class>& classes, const List<Method>& functions):
+			classes(classes), functions(functions) {}
 
 		/* Fields */
 		List<Class> classes;
 		std::unordered_map<std::string, std::shared_ptr<Class>> classes_table;
+
+		List<Method> functions;
+		std::unordered_map<std::string, std::shared_ptr<Method>> functions_table;
 
 		/* Methods */
 		virtual std::string toString(bool) const;
@@ -375,8 +385,10 @@ class Binary: public Expr {
 class Call: public Expr {
 	public:
 		/* Constructors */
-		Call(Expr*, const std::string&, const List<Expr>&);
-		Call(std::shared_ptr<Expr>, const std::string&, const List<Expr>&);
+		Call(Expr* scope, const std::string& name, const List<Expr>& args):
+			scope(scope), name(name), args(args) {}
+		Call(std::shared_ptr<Expr> scope, const std::string& name, const List<Expr>& args):
+			scope(scope), name(name), args(args) {}
 
 		/* Fields */
 		std::shared_ptr<Expr> scope;
@@ -418,6 +430,9 @@ class Self: public Identifier {
 	public:
 		/* Constructors */
 		Self(): Identifier("self") {}
+
+		/* Methods */
+		virtual bool isSelf() const { return true; };
 };
 
 class Integer: public Expr {

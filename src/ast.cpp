@@ -6,7 +6,6 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/GlobalVariable.h"
 
-#include <algorithm>
 #include <iterator>
 
 using namespace std;
@@ -194,11 +193,6 @@ string Expr::toString(bool with_type) const {
 
 /***** Block *****/
 
-/* Constructors */
-Block::Block(const List<Expr>& exprs): exprs(exprs) {
-	reverse(this->exprs.begin(), this->exprs.end());
-}
-
 /* Methods */
 string Block::toString_aux(bool with_type) const {
 	if (exprs.size() == 1)
@@ -266,22 +260,18 @@ llvm::Type* Formal::getType(LLVMHelper& h) const {
 
 /***** Method *****/
 
-/* Constructors */
-Method::Method(const string& name, const List<Formal>& formals, const string& type, Block* block):
-	name(name), formals(formals), type(type), block(block) {
-		reverse(this->formals.begin(), this->formals.end());
-	}
-Method::Method(const string& name, const List<Formal>& formals, const string& type, shared_ptr<Block> block):
-	name(name), formals(formals), type(type), block(block) {
-		reverse(this->formals.begin(), this->formals.end());
-	}
-
 /* Methods */
 string Method::toString(bool with_type) const {
-	return "Method(" + name + "," + formals.toString(with_type) + "," + type + "," + block->toString(with_type) + ")";
+	string str = "Method(" + name + "," + formals.toString(with_type) + "," + type;
+	if (block)
+		str += "," + block->toString(with_type);
+	return str + ")";
 }
 
 void Method::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
+	if (not block) // extern method
+		return;
+
 	llvm::Function* f = this->getFunction(h);
 
 	llvm::BasicBlock* entry_block = llvm::BasicBlock::Create(h.context, "", f);
@@ -304,6 +294,7 @@ void Method::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors)
 		}
 	}
 
+	// Method block
 	block->codegen(p, h, s, errors);
 
 	// Remove arguments from scope
@@ -362,15 +353,16 @@ void Method::declaration(LLVMHelper& h, vector<Error>& errors) {
 		llvm::Function* f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, this->getName(), h.module);
 
 		// Set argument names
-		f->getArg(0)->setName("self");
+		if (parent)
+			f->getArg(0)->setName("self");
 		for (int i = 0; i < formals.size(); ++i)
-			f->getArg(i + 1)->setName(formals[i]->name);
+			f->getArg(parent ? i + 1 : i)->setName(formals[i]->name);
 	} else
 		errors.push_back({this->line, this->column, "unknown type " + type});
 }
 
 string Method::getName() const {
-	return parent ? parent->name + "_" + name : name;
+	return parent ? (parent->name + "_" + name) : name;
 }
 
 llvm::Function* Method::getFunction(LLVMHelper& h) const {
@@ -383,13 +375,6 @@ llvm::FunctionType* Method::getType(LLVMHelper& h) const {
 }
 
 /***** Class *****/
-
-/* Constructors */
-Class::Class(const string& name, const string& parent, const List<Field>& fields, const List<Method>& methods):
-	name(name), parent_name(parent), fields(fields), methods(methods) {
-		reverse(this->fields.begin(), this->fields.end());
-		reverse(this->methods.begin(), this->methods.end());
-	}
 
 /* Methods */
 string Class::toString(bool with_type) const {
@@ -595,7 +580,7 @@ void Class::declaration(LLVMHelper& h, vector<Error>& errors) {
 
 		if (not f) // invalid function
 			it = prev(methods.erase(it));
-		if (methods_table.find((*it)->name) != methods_table.end()) { // method already exists
+		else if (methods_table.find((*it)->name) != methods_table.end()) { // method already exists
 			errors.push_back({(*it)->line, (*it)->column, "redefinition of method " + (*it)->name});
 			f->eraseFromParent();
 			it = prev(methods.erase(it));
@@ -656,19 +641,20 @@ llvm::StructType* Class::getType(LLVMHelper& h) const {
 
 /***** Program *****/
 
-/* Constructors */
-Program::Program(const List<Class>& classes): classes(classes) {
-	reverse(this->classes.begin(), this->classes.end());
-}
-
 /* Methods */
 string Program::toString(bool with_type) const {
-	return classes.toString(with_type);
+	string str = classes.toString(with_type);
+	if (not functions.empty())
+		str += "," + functions.toString(with_type);
+	return str;
 }
 
 void Program::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
 	// Classes code generation
 	classes.codegen(p, h, s, errors);
+
+	// Functions code generation
+	functions.codegen(p, h, s, errors);
 
 	// Main
 	if (classes_table.find("Main") != classes_table.end()) {
@@ -705,18 +691,19 @@ void Program::declaration(LLVMHelper& h, vector<Error>& errors) {
 	// Object
 	classes_table["Object"] = shared_ptr<Class>(new Class("Object", "Object", {},
 		List<Method>({
-			new Method("inputInt32", {}, "int32", new Block()),
-			new Method("inputBool", {}, "bool", new Block()),
-			new Method("inputLine", {}, "string", new Block()),
-			new Method("printInt32", {new Formal("i", "int32")}, "Object", new Block()),
-			new Method("printBool", {new Formal("b", "bool")}, "Object", new Block()),
-			new Method("print", {new Formal("s", "string")}, "Object", new Block())
+			new Method("print", {new Formal("s", "string")}, "Object", nullptr),
+			new Method("printBool", {new Formal("b", "bool")}, "Object", nullptr),
+			new Method("printInt32", {new Formal("i", "int32")}, "Object", nullptr),
+			new Method("inputLine", {}, "string", nullptr),
+			new Method("inputBool", {}, "bool", nullptr),
+			new Method("inputInt32", {}, "int32", nullptr)
 		})
 	));
 
+	classes_table["Object"]->parent = nullptr;
 	classes_table["Object"]->getType(h); // class forward declaration
 
-	// Redefinition and overriding
+	// Classes redefinition and overriding
 	int size;
 	do {
 		size = classes_table.size();
@@ -742,6 +729,23 @@ void Program::declaration(LLVMHelper& h, vector<Error>& errors) {
 			errors.push_back({(*it)->line, (*it)->column, "class " + (*it)->name + " cannot extend class " + (*it)->parent_name});
 			it = prev(classes.erase(it));
 		}
+
+	// Functions redefinition
+	for (auto it = functions.begin(); it != functions.end(); ++it) {
+		(*it)->parent = nullptr;
+		(*it)->declaration(h, errors);
+
+		llvm::Function* f = (*it)->getFunction(h);
+
+		if (not f) // invalid function
+			it = prev(functions.erase(it));
+		else if (functions_table.find((*it)->name) != functions_table.end()) { // function already exists
+			errors.push_back({(*it)->line, (*it)->column, "redefinition of function " + (*it)->name});
+			f->eraseFromParent();
+			it = prev(functions.erase(it));
+		} else
+			functions_table[(*it)->name] = *it;
+	}
 }
 
 /***** If *****/
@@ -876,9 +880,9 @@ llvm::Value* For::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>
 		}),
 		new While(
 			new Binary(Binary::LOWER_EQUAL, new Identifier(name), new Identifier("_last")),
-			new Block({ // /!\ reversed in constructor
+			new Block({
+				body,
 				make_shared<Assign>(name, new Binary(Binary::PLUS, new Identifier(name), new Integer(1))),
-				body
 			})
 		)
 	).codegen_aux(p, h, s, errors);
@@ -1161,18 +1165,8 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 
 /***** Call *****/
 
-/* Constructors */
-Call::Call(Expr* scope, const string& name, const List<Expr>& args):
-	scope(scope), name(name), args(args) {
-		reverse(this->args.begin(), this->args.end());
-	}
-Call::Call(shared_ptr<Expr> scope, const string& name, const List<Expr>& args):
-	scope(scope), name(name), args(args) {
-		reverse(this->args.begin(), this->args.end());
-	}
-
 /* Methods */
-string Call::toString_aux(bool with_type) const {
+string Call::toString_aux(bool with_type) const { // improvement -> replace 'self' by
 	return "Call(" + scope->toString(with_type) + "," + name + "," + args.toString(with_type) + ")";
 }
 
@@ -1183,28 +1177,39 @@ llvm::Value* Call::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error
 	args.codegen(p, h, s, errors);
 
 	if (isClass(scope_t)) {
-		// Search method in scope
+		llvm::Function* f;
+		llvm::FunctionType* ft;
+		vector<llvm::Value*> params;
+
+		// Get scope class type
 		shared_ptr<Class> c = p->classes_table[asString(scope_t)];
 
-		auto it = c->methods_table.find(name);
-		if (it != c->methods_table.end()) {
-			llvm::Function* f = (llvm::Function*) h.builder.CreateLoad(
+		if (c->methods_table.find(name) != c->methods_table.end()) { // class method
+			f = (llvm::Function*) h.builder.CreateLoad(
 				h.builder.CreateStructGEP(
 					h.builder.CreateLoad(
 						h.builder.CreateStructGEP(scope->val, 0)
 					), // scope->vtable
-					it->second->idx
+					c->methods_table[name]->idx
 				)
 			); // vtable->method
 
-			llvm::FunctionType* ft = (llvm::FunctionType*) f->getType()->getPointerElementType();
+			ft = (llvm::FunctionType*) f->getType()->getPointerElementType();
+
+			// Add scope as self param
+			params.push_back(scope->val);
+		} else if (scope->isSelf() and p->functions_table.find(name) != p->functions_table.end()) { // top-level function
+			f = p->functions_table[name]->getFunction(h);
+			ft = f->getFunctionType();
+		}
+
+		if (f) {
+			int align = params.empty() ? 0 : 1;
 
 			// Compare call with signature
-			if (args.size() + 1 == ft->getNumParams()) {
-				vector<llvm::Value*> params = {scope->val};
-
+			if (args.size() + align == ft->getNumParams()) {
 				for (int i = 0; i < args.size(); ++i) {
-					llvm::Type* param_t = ft->getParamType(i + 1);
+					llvm::Type* param_t = ft->getParamType(i + align);
 					llvm::Type* arg_t = args[i]->val ? args[i]->val->getType() : nullptr;
 
 					if (isEqualTo(arg_t, param_t))
@@ -1223,7 +1228,7 @@ llvm::Value* Call::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error
 				if (params.size() == ft->getNumParams()) // all arguments have the good type
 					return h.builder.CreateCall(f, params);
 			} else
-				errors.push_back({this->line, this->column, "call to method " + it->first + " with wrong number of arguments"});
+				errors.push_back({this->line, this->column, "call to method " + name + " with wrong number of arguments"});
 		} else
 			errors.push_back({this->line, this->column, "call to undeclared method " + name});
 	} else

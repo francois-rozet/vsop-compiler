@@ -10,7 +10,7 @@
 
 	/* bison global variables */
 	extern int yymode;
-	extern bool yyext;
+	bool yyext = false;
 
 	/* bison global functions */
 	extern int yyerror(const std::string&);
@@ -70,10 +70,12 @@
 
 	/* extensions */
 	std::unordered_map<std::string, int> extensions = {
+		{"extern", EXTERN},
 		{"for", FOR},
 		{"lets", LETS},
 		{"mod", MOD},
 		{"or", OR},
+		{"static", STATIC},
 		{"to", TO}
 	};
 
@@ -145,6 +147,10 @@ ext_operator				">="|">"|"!="
 		case START_PARSER:
 			yymode = 0;
 			return START_PARSER;
+		case START_EXTENDED:
+			yymode = 0;
+			yyext = true;
+			return START_EXTENDED;
 		default: break;
 	}
 %}

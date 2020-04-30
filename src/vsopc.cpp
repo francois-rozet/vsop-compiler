@@ -10,10 +10,11 @@
 using namespace std;
 
 /* global variables */
-int yymode;
-bool yyext = false;
+int yymode = START_PARSER;
 
 List<Class> yyclasses;
+List<Method> yyfunctions;
+
 Program* program;
 
 llvm::LLVMContext context;
@@ -37,10 +38,9 @@ void lexer() {
 }
 
 void parser() {
-	yymode = START_PARSER;
 	yyparse();
 
-	program = new Program(yyclasses);
+	program = new Program(yyclasses, yyfunctions);
 }
 
 void checker() {
@@ -90,7 +90,7 @@ int main (int argc, char* argv[]) {
 			case check: checkflag = true;
 			case parse: parseflag = true;
 			case lex: lexflag = true; execflag = false; break;
-			case ext: yyext = true; break;
+			case ext: yymode = START_EXTENDED; break;
 			default: filename = argv[i];
 		}
 

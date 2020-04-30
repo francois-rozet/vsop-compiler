@@ -12,7 +12,6 @@
 	int num;
 	char* id;
 	Class* clas;
-	List<Class>* classes;
 	Class::Definition* defn;
 	Field* field;
 	List<Field>* fields;
@@ -41,6 +40,7 @@
 	/* main gloabl variables */
 	extern int yymode;
 	extern List<Class> yyclasses;
+	extern List<Method> yyfunctions;
 
 	/* flex global variables */
 	extern FILE* yyin;
@@ -77,6 +77,7 @@
 %token <id> DO "do"
 %token <id> ELSE "else"
 %token <id> EXTENDS "extends"
+%token <id> EXTERN "extern" // -ext
 %token <id> FALSE "false"
 %token <id> FOR "for" // -ext
 %token <id> IF "if"
@@ -89,13 +90,14 @@
 %token <id> NOT "not"
 %token <id> MOD "mod" // -ext
 %token <id> OR "or" // -ext
+%token <id> SELF "self"
 %token <id> SSTRING "string"
+%token <id> STATIC "static" // -ext
 %token <id> THEN "then"
 %token <id> TO "to" // -ext
 %token <id> TRUE "true"
 %token <id> UNIT "unit"
 %token <id> WHILE "while"
-%token <id> SELF "self"
 
 %token <id> LBRACE "{"
 %token <id> RBRACE "}"
@@ -118,16 +120,15 @@
 %token <id> GREATER_EQUAL ">=" // -ext
 %token <id> ASSIGN "<-"
 
-%token START_LEXER START_PARSER;
+%token START_LEXER START_PARSER START_EXTENDED;
 %start start;
 
 %nterm <id> type class-parent type_id object_id
-%nterm <classes> program
 %nterm <clas> class
 %nterm <defn> class-aux
 %nterm <field> field
 %nterm <fields> fields fields-aux // -ext
-%nterm <method> method
+%nterm <method> method interface
 %nterm <formals> formals formals-aux
 %nterm <formal> formal
 %nterm <block> block block-aux args args-aux
@@ -149,7 +150,8 @@
 %%
 
 start:			START_LEXER token
-				| START_PARSER program;
+				| START_PARSER program
+				| START_EXTENDED extended;
 
 token:			/* */
 				| token INTEGER_LITERAL
@@ -165,7 +167,7 @@ token:			/* */
 
 object:			OBJECT_IDENTIFIER | "self";
 
-keyword:		"and" | "bool" | "class" | "do" | "else" | "extends" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
+keyword:		"and" | "bool" | "class" | "do" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "static" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
 
 program:		class
 				{ yyclasses.add($1); }
@@ -175,6 +177,20 @@ program:		class
 				{ yyerrok; }
 				| error program
 				{ yyerrok; };
+
+extended:		extended-aux
+				| extended-aux extended
+				| error
+				{ yyerrok; }
+				| error extended
+				{ yyerrok; };
+
+extended-aux:	class
+				{ yyclasses.add($1); }
+				| "static" method
+				{ yyfunctions.add($2); }
+				| "extern" interface ";"
+				{ yyfunctions.add($2); };
 
 class:			"class" type_id class-parent "{" class-aux
 				{ $$ = new Class($2, $3, $5->fields, $5->methods); yylocate($$, @$); delete $5; };
@@ -218,8 +234,11 @@ fields-aux:		field ")"
 				| error "," fields-aux
 				{ $$ = $3; yyerrok; };
 
-method:			object_id formals ":" type block
-				{ $$ = new Method($1, *$2, $4, new Block(*$5)); yylocate($$, @$); delete $2; };
+interface:		object_id formals ":" type
+				{ $$ = new Method($1, *$2, $4, NULL); yylocate($$, @$); delete $2; };
+
+method:			interface block
+				{ $1->block = std::make_shared<Block>(*$2); $$ = $1; delete $2; };
 
 formal:			object_id ":" type // possible improvement -> merge field and formal
 				{ $$ = new Formal($1, $3); yylocate($$, @$); };
