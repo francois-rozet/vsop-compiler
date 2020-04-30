@@ -1,6 +1,11 @@
 #include "vsop.tab.h"
 
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_os_ostream.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
 
 #include <iostream>
 #include <string>
@@ -32,6 +37,8 @@ extern void yyerror(const string&);
 extern bool yyopen(char*);
 extern void yyclose();
 
+/* functions */
+
 void lexer() {
 	yymode = START_LEXER;
 	yyparse();
@@ -59,6 +66,27 @@ void checker() {
 	for (Error& e: errors) {
 		yyrelocate(e.line, e.column);
 		yyerror("semantic error, " + e.msg);
+	}
+}
+
+void llvmer() {
+	// Create function pass manager
+	llvm::legacy::FunctionPassManager optimizer(&module);
+
+	optimizer.add(llvm::createInstructionCombiningPass()); // peephole and bit-twiddling optimizations
+	optimizer.add(llvm::createReassociatePass()); // reassociate expressions
+	optimizer.add(llvm::createGVNPass()); // eliminate common sub-expressions
+	optimizer.add(llvm::createCFGSimplificationPass()); // simplify the control flow graph (deleting unreachable blocks, etc)
+
+	optimizer.doInitialization();
+
+	// Pass over each functions
+	for (auto it = module.begin(); it != module.end(); ++it) {
+		// Validate the generated code
+		llvm::verifyFunction(*it);
+
+		// Run the optimizer
+		optimizer.run(*it);
 	}
 }
 
@@ -115,6 +143,8 @@ int main (int argc, char* argv[]) {
 				checker();
 
 				if (llvmflag) {
+					llvmer();
+
 					if (execflag) {
 						cout << "todo" << endl;
 					} else {
