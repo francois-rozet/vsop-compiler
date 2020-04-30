@@ -56,7 +56,7 @@
 	void yyrelocate(const YYLTYPE&);
 	void yyprint(const std::string&);
 	void yyerror(const std::string&);
-	bool yyopen(char*);
+	bool yyopen(const char*);
 	void yyclose();
 %}
 
@@ -443,8 +443,8 @@ void yyerror(const std::string& msg) {
 	++yyerrs;
 }
 
-bool yyopen(char* filename) {
-	yylloc.filename = filename;
+bool yyopen(const char* filename) {
+	yylloc.filename = strdup(filename);
 	yyin = fopen(yylloc.filename, "r");
 
 	return yyin ? true : false;

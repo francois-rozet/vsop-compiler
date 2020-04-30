@@ -278,8 +278,8 @@ void Method::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors)
 	h.builder.SetInsertPoint(entry_block);
 
 	// Add arguments to scope
-	for (int i = 0, e = f->getFunctionType()->getNumParams(); i < e; ++i) {
-		llvm::Value* arg = f->getArg(i);
+	for (auto& it: f->args()) {
+		llvm::Value* arg = &it;
 
 		if (isUnit(arg->getType()))
 			s.push(arg->getName(), nullptr);
@@ -298,8 +298,8 @@ void Method::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors)
 	block->codegen(p, h, s, errors);
 
 	// Remove arguments from scope
-	for (int i = 0, e = f->getFunctionType()->getNumParams(); i < e; ++i)
-		s.pop(f->getArg(i)->getName());
+	for (auto& it: f->args())
+		s.pop(it.getName());
 
 	// Result casting
 	llvm::Type* block_t = block->val ? block->val->getType() : nullptr;
@@ -352,11 +352,14 @@ void Method::declaration(LLVMHelper& h, vector<Error>& errors) {
 		// Forward declaration
 		llvm::Function* f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, this->getName(), h.module);
 
-		// Set argument names
+		// First argument as 'self'
 		if (parent)
-			f->getArg(0)->setName("self");
-		for (int i = 0; i < formals.size(); ++i)
-			f->getArg(parent ? i + 1 : i)->setName(formals[i]->name);
+			f->arg_begin()->setName("self");
+
+		// Set arguments names
+		int i = 0;
+		for (auto it = f->arg_begin() + (parent ? 1 : 0); it != f->arg_end(); ++it)
+			it->setName(formals[i++]->name);
 	} else
 		errors.push_back({this->line, this->column, "unknown type " + type});
 }
@@ -454,7 +457,7 @@ void Class::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) 
 	h.builder.CreateCall(
 		h.module.getFunction(parent->name + "_init"),
 		{h.builder.CreatePointerCast(
-			f->getArg(0),
+			f->arg_begin(),
 			parent->getType(h)->getPointerTo()
 		)}
 	);
@@ -467,7 +470,7 @@ void Class::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) 
 			h.builder.CreateStore(
 				field->val,
 				h.builder.CreateStructGEP(
-					f->getArg(0),
+					f->arg_begin(),
 					fields_table[field->name]->idx
 				)
 			);
@@ -623,7 +626,7 @@ void Class::declaration(LLVMHelper& h, vector<Error>& errors) {
 		false
 	);
 	f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name + "_init", h.module);
-	f->getArg(0)->setName("self");
+	f->arg_begin()->setName("self");
 }
 
 string Class::getName() const {

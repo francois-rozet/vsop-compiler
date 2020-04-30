@@ -2,14 +2,15 @@
 
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
-#include "llvm/Support/raw_os_ostream.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 using namespace std;
@@ -20,11 +21,16 @@ int yymode = START_PARSER;
 List<Class> yyclasses;
 List<Method> yyfunctions;
 
-Program* program;
+/* static variables */
 
-llvm::LLVMContext context;
-llvm::IRBuilder<> builder(context);
-llvm::Module module("VSOP", context);
+static Program* program;
+
+static llvm::LLVMContext context;
+static llvm::IRBuilder<> builder(context);
+static llvm::Module module("VSOP", context);
+
+static string rso_string;
+static llvm::raw_string_ostream rso(rso_string);
 
 /* bison global variables */
 extern int yyerrs;
@@ -34,7 +40,7 @@ extern int yyparse(void);
 extern void yyrelocate(int, int);
 extern void yyprint(const string&);
 extern void yyerror(const string&);
-extern bool yyopen(char*);
+extern bool yyopen(const char*);
 extern void yyclose();
 
 /* functions */
@@ -83,7 +89,11 @@ void llvmer() {
 	// Pass over each functions
 	for (auto it = module.begin(); it != module.end(); ++it) {
 		// Validate the generated code
-		llvm::verifyFunction(*it);
+		if (llvm::verifyFunction(*it, &rso)) {
+			rso << '\n';
+			++yyerrs;
+			continue;
+		}
 
 		// Run the optimizer
 		optimizer.run(*it);
@@ -96,21 +106,27 @@ enum flags {
 	check,
 	llvmir,
 	ext,
+	nopt,
 	none
 };
 
-flags hashflag(std::string const& str) {
+flags hashflag(const string& str) {
 	if (str == "-lex") return lex;
 	if (str == "-parse") return parse;
 	if (str == "-check") return check;
 	if (str == "-llvm") return llvmir;
 	if (str == "-ext") return ext;
+	if (str == "-nopt") return nopt;
 	return none;
 }
 
+int sys(const string& cmd) {
+	return system(cmd.c_str());
+}
+
 int main (int argc, char* argv[]) {
-	bool lexflag = false, parseflag = false, checkflag = false, llvmflag = false, execflag = true;
-	char* filename;
+	bool lexflag = false, parseflag = false, checkflag = false, llvmflag = false, execflag = true, optflag = true;
+	string filename;
 
 	for (int i = 1; i < argc; ++i)
 		switch (hashflag(argv[i])) {
@@ -119,16 +135,17 @@ int main (int argc, char* argv[]) {
 			case parse: parseflag = true;
 			case lex: lexflag = true; execflag = false; break;
 			case ext: yymode = START_EXTENDED; break;
+			case nopt: optflag = false; break;
 			default: filename = argv[i];
 		}
 
 	if (execflag)
 		lexflag = parseflag = checkflag = llvmflag = true;
 
-	if (not filename) {
+	if (filename.empty()) {
 		cerr << "vsopc : error: no input file" << endl;
 		return 1;
-	} else if (not yyopen(filename)) {
+	} else if (not yyopen(filename.c_str())) {
 		cerr << "vsopc: fatal-error: " << filename << ": No such file or directory" << endl;
 		return 1;
 	}
@@ -142,15 +159,29 @@ int main (int argc, char* argv[]) {
 			if (checkflag) {
 				checker();
 
-				if (llvmflag) {
-					llvmer();
+				if (yyerrs == 0 and llvmflag) {
+					if (optflag)
+						llvmer();
 
-					if (execflag) {
-						cout << "todo" << endl;
-					} else {
-						llvm::raw_os_ostream roo(cout);
-						roo << module;
-					}
+					rso << module;
+
+					if (yyerrs == 0 and execflag and system(NULL)) {
+						// Get basename
+						string basename = filename.substr(0, filename.find_last_of('.'));
+						string object = "resources/runtime/object";
+
+						// Dump LLVM IR code
+						ofstream out(basename + ".ll");
+						out << rso.str();
+						out.close();
+
+						// Compile basename.ll to assembly
+						sys("llc-9 " + basename + ".ll -O2");
+
+						// Bind with object.s and create executable
+						sys("clang " + basename + ".s /usr/local/lib/vsopc/object.s -o " + basename);
+					} else
+						cout << rso.str() << endl;
 				} else
 					cout << program->toString(true) << endl;
 			} else
