@@ -11,15 +11,16 @@
 {
 	int num;
 	char* id;
-	List<Class>* classes;
 	Class* clas;
-	Class::Definition* decl;
+	List<Class>* classes;
+	Class::Definition* defn;
 	Field* field;
+	List<Field>* fields;
 	Method* method;
-	List<Formal>* formals;
 	Formal* formal;
-	List<Expr>* block;
+	List<Formal>* formals;
 	Expr* expr;
+	List<Expr>* block;
 }
 
 %code requires {
@@ -77,15 +78,20 @@
 %token <id> ELSE "else"
 %token <id> EXTENDS "extends"
 %token <id> FALSE "false"
+%token <id> FOR "for" // -ext
 %token <id> IF "if"
 %token <id> IN "in"
 %token <id> INT32 "int32"
 %token <id> ISNULL "isnull"
 %token <id> LET "let"
+%token <id> LETS "lets" // -ext
 %token <id> NEW "new"
 %token <id> NOT "not"
+%token <id> MOD "mod" // -ext
+%token <id> OR "or" // -ext
 %token <id> SSTRING "string"
 %token <id> THEN "then"
+%token <id> TO "to" // -ext
 %token <id> TRUE "true"
 %token <id> UNIT "unit"
 %token <id> WHILE "while"
@@ -105,8 +111,11 @@
 %token <id> POW "^"
 %token <id> DOT "."
 %token <id> EQUAL "="
+%token <id> NEQUAL "!=" // -ext
 %token <id> LOWER "<"
 %token <id> LOWER_EQUAL "<="
+%token <id> GREATER ">" // -ext
+%token <id> GREATER_EQUAL ">=" // -ext
 %token <id> ASSIGN "<-"
 
 %token START_LEXER START_PARSER;
@@ -115,25 +124,26 @@
 %nterm <id> type class-parent type_id object_id
 %nterm <classes> program
 %nterm <clas> class
-%nterm <decl> class-aux
+%nterm <defn> class-aux
 %nterm <field> field
+%nterm <fields> fields fields-aux // -ext
 %nterm <method> method
 %nterm <formals> formals formals-aux
 %nterm <formal> formal
 %nterm <block> block block-aux args args-aux
-%nterm <expr> expr expr-aux if while let unary binary call literal init
+%nterm <expr> expr expr-aux if while for let lets unary binary call literal init
 
-%precedence "if" "then" "while" "do" "let" "in"
+%precedence "if" "then" "while" "do" "for" "to" "let" "lets" "in"
 %precedence "else"
 
 %right "<-"
-%left "and"
+%left "and" "or"
 %right "not"
-%nonassoc "<" "<=" "="
+%nonassoc "<" "<=" ">" ">=" "=" "!="
 %left "+" "-"
 %left "*" "/"
 %right UMINUS "isnull"
-%right "^"
+%right "mod" "^"
 %left "."
 
 %%
@@ -143,9 +153,9 @@ start:			START_LEXER token
 
 token:			/* */
 				| token INTEGER_LITERAL
-				{ yyprint("integer-literal," + Integer($2).to_string(false)); }
+				{ yyprint("integer-literal," + Integer($2).toString(false)); }
 				| token STRING_LITERAL
-				{ yyprint("string-literal," + String($2).to_string(false));  }
+				{ yyprint("string-literal," + String($2).toString(false));  }
 				| token TYPE_IDENTIFIER
 				{ yyprint("type-identifier," + std::string($2)); }
 				| token object
@@ -155,7 +165,7 @@ token:			/* */
 
 object:			OBJECT_IDENTIFIER | "self";
 
-keyword:		"and" | "bool" | "class" | "do" | "else" | "extends" | "false" | "if" | "in" | "int32" | "isnull" | "let" | "new" | "not" | "string" | "then" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "<" | "<=" | "<-";
+keyword:		"and" | "bool" | "class" | "do" | "else" | "extends" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
 
 program:		class
 				{ yyclasses.add($1); }
@@ -176,8 +186,8 @@ class-parent:	/* */
 
 class-aux:		"}"
 				{ $$ = new Class::Definition(); }
-				| field class-aux
-				{ $2->fields.add($1); $$ = $2;	}
+				| field ";" class-aux
+				{ $3->fields.add($1); $$ = $3;	}
 				| method class-aux
 				{ $2->methods.add($1); $$ = $2;	}
 				| error "}"
@@ -192,13 +202,26 @@ class-aux:		"}"
 					yyerror("syntax error, unexpected end-of-file, missing ending } of class declaration");
 				};
 
-field:			object_id ":" type init ";"
+field:			object_id ":" type init
 				{ $$ = new Field($1, $3, $4); yylocate($$, @$); };
+
+fields:			"(" ")"
+				{ $$ = new List<Field>(); }
+				| "(" fields-aux
+				{ $$ = $2; };
+fields-aux:		field ")"
+				{ $$ = new List<Field>(); $$->add($1); }
+				| field "," fields-aux
+				{ $3->add($1); $$ = $3; }
+				| error ")"
+				{ $$ = new List<Field>(); yyerrok; }
+				| error "," fields-aux
+				{ $$ = $3; yyerrok; };
 
 method:			object_id formals ":" type block
 				{ $$ = new Method($1, *$2, $4, new Block(*$5)); yylocate($$, @$); delete $2; };
 
-formal:			object_id ":" type
+formal:			object_id ":" type // possible improvement -> merge field and formal
 				{ $$ = new Formal($1, $3); yylocate($$, @$); };
 
 formals:		"(" ")"
@@ -261,7 +284,9 @@ expr:			expr-aux
 				{ $$ = $1; yylocate($$, @$); };
 expr-aux:		if
 				| while
+				| for
 				| let
+				| lets
 				| unary
 				| binary
 				| call
@@ -289,8 +314,15 @@ if:				"if" expr "then" expr
 while:			"while" expr "do" expr
 				{ $$ = new While($2, $4); };
 
+for:			"for" object_id "<-" expr "to" expr "do" expr
+				{ $$ = new For($2, $4, $6, $8); };
+
 let:			"let" object_id ":" type init "in" expr
 				{ $$ = new Let($2, $4, $5, $7); };
+
+lets:			"lets" fields "in" expr
+				{ $$ = new Lets(*$2, $4); };
+
 init:			/* */
 				{ $$ = NULL; }
 				| "<-" expr
@@ -305,12 +337,20 @@ unary:			"not" expr
 
 binary:			expr "and" expr
 				{ $$ = new Binary(Binary::AND, $1, $3); }
+				| expr "or" expr
+				{ $$ = new Binary(Binary::OR, $1, $3); }
 				| expr "=" expr
 				{ $$ = new Binary(Binary::EQUAL, $1, $3); }
+				| expr "!=" expr
+				{ $$ = new Binary(Binary::NEQUAL, $1, $3); }
 				| expr "<" expr
 				{ $$ = new Binary(Binary::LOWER, $1, $3); }
 				| expr "<=" expr
 				{ $$ = new Binary(Binary::LOWER_EQUAL, $1, $3); }
+				| expr ">" expr
+				{ $$ = new Binary(Binary::GREATER, $1, $3); }
+				| expr ">=" expr
+				{ $$ = new Binary(Binary::GREATER_EQUAL, $1, $3); }
 				| expr "+" expr
 				{ $$ = new Binary(Binary::PLUS, $1, $3); }
 				| expr "-" expr
@@ -320,7 +360,9 @@ binary:			expr "and" expr
 				| expr "/" expr
 				{ $$ = new Binary(Binary::DIV, $1, $3); }
 				| expr "^" expr
-				{ $$ = new Binary(Binary::POW, $1, $3); };
+				{ $$ = new Binary(Binary::POW, $1, $3); }
+				| expr "mod" expr
+				{ $$ = new Binary(Binary::MOD, $1, $3); };
 
 literal:		INTEGER_LITERAL
 				{ $$ = new Integer($1); }

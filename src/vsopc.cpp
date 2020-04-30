@@ -11,6 +11,8 @@ using namespace std;
 
 /* global variables */
 int yymode;
+bool yyext = false;
+
 List<Class> yyclasses;
 Program* program;
 
@@ -60,42 +62,73 @@ void checker() {
 	}
 }
 
+enum flags {
+	lex,
+	parse,
+	check,
+	llvmir,
+	ext,
+	none
+};
+
+flags hashflag(std::string const& str) {
+	if (str == "-lex") return lex;
+	if (str == "-parse") return parse;
+	if (str == "-check") return check;
+	if (str == "-llvm") return llvmir;
+	if (str == "-ext") return ext;
+	return none;
+}
+
 int main (int argc, char* argv[]) {
-	if (argc < 2)
-		return 0;
-	else if (argc < 3) {
-		cerr << "vsopc " << argv[1] << ": error: no input file" << endl;
+	bool lexflag = false, parseflag = false, checkflag = false, llvmflag = false, execflag = true;
+	char* filename;
+
+	for (int i = 1; i < argc; ++i)
+		switch (hashflag(argv[i])) {
+			case llvmir: llvmflag = true;
+			case check: checkflag = true;
+			case parse: parseflag = true;
+			case lex: lexflag = true; execflag = false; break;
+			case ext: yyext = true; break;
+			default: filename = argv[i];
+		}
+
+	if (execflag)
+		lexflag = parseflag = checkflag = llvmflag = true;
+
+	if (not filename) {
+		cerr << "vsopc : error: no input file" << endl;
 		return 1;
-	} else if (not yyopen(argv[2])) {
-		cerr << "vsopc: fatal-error: " << argv[2] << ": No such file or directory" << endl;
+	} else if (not yyopen(filename)) {
+		cerr << "vsopc: fatal-error: " << filename << ": No such file or directory" << endl;
 		return 1;
 	}
 
-	module.setSourceFileName(argv[2]);
+	module.setSourceFileName(filename);
 
-	string action = argv[1];
+	if (lexflag) {
+		if (parseflag) {
+			parser();
 
-	if (action == "-lex")
-		lexer();
-	else {
-		parser();
+			if (checkflag) {
+				checker();
 
-		if (action == "-parse")
-			cout << program->to_string(false) << endl;
-		else {
-			checker();
+				if (llvmflag) {
+					if (execflag) {
+						cout << "todo" << endl;
+					} else {
+						llvm::raw_os_ostream roo(cout);
+						roo << module;
+					}
+				} else
+					cout << program->toString(true) << endl;
+			} else
+				cout << program->toString(false) << endl;
 
-			if (action == "-check")
-				cout << program->to_string(true) << endl;
-			else {
-				if (action == "-llvm") {
-					llvm::raw_os_ostream roo(cout);
-					roo << module;
-				}
-			}
-		}
-
-		delete program;
+			delete program;
+		} else
+			lexer();
 	}
 
 	yyclose();

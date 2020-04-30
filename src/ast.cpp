@@ -185,8 +185,8 @@ llvm::Value* Scope::get(const string& name) const {
 
 /***** Expr *****/
 
-string Expr::to_string(bool with_type) const {
-	string str = this->to_string_aux(with_type);
+string Expr::toString(bool with_type) const {
+	string str = this->toString_aux(with_type);
 	if (with_type)
 		str += ":" + asString(val ? val->getType() : nullptr);
 	return str;
@@ -200,10 +200,10 @@ Block::Block(const List<Expr>& exprs): exprs(exprs) {
 }
 
 /* Methods */
-string Block::to_string_aux(bool with_type) const {
+string Block::toString_aux(bool with_type) const {
 	if (exprs.size() == 1)
-		return exprs.front()->to_string_aux(with_type);
-	return exprs.to_string(with_type);
+		return exprs.front()->toString_aux(with_type);
+	return exprs.toString(with_type);
 }
 
 llvm::Value* Block::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
@@ -214,10 +214,10 @@ llvm::Value* Block::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 /***** Field *****/
 
 /* Methods */
-string Field::to_string(bool with_type) const {
+string Field::toString(bool with_type) const {
 	string str = "Field(" + name + "," + type;
 	if (init)
-		str += "," + init->to_string(with_type);
+		str += "," + init->toString(with_type);
 	return str + ")";
 }
 
@@ -251,7 +251,7 @@ llvm::Type* Field::getType(LLVMHelper& h) const {
 /***** Formal *****/
 
 /* Methods */
-string Formal::to_string(bool with_type) const {
+string Formal::toString(bool with_type) const {
 	return name + ":" + type;
 }
 
@@ -267,13 +267,18 @@ llvm::Type* Formal::getType(LLVMHelper& h) const {
 /***** Method *****/
 
 /* Constructors */
-Method::Method(const string& name, const List<Formal>& formals, const string& type, Block* block): name(name), formals(formals), type(type), block(block) {
-	reverse(this->formals.begin(), this->formals.end());
-}
+Method::Method(const string& name, const List<Formal>& formals, const string& type, Block* block):
+	name(name), formals(formals), type(type), block(block) {
+		reverse(this->formals.begin(), this->formals.end());
+	}
+Method::Method(const string& name, const List<Formal>& formals, const string& type, shared_ptr<Block> block):
+	name(name), formals(formals), type(type), block(block) {
+		reverse(this->formals.begin(), this->formals.end());
+	}
 
 /* Methods */
-string Method::to_string(bool with_type) const {
-	return "Method(" + name + "," + formals.to_string(with_type) + "," + type + "," + block->to_string(with_type) + ")";
+string Method::toString(bool with_type) const {
+	return "Method(" + name + "," + formals.toString(with_type) + "," + type + "," + block->toString(with_type) + ")";
 }
 
 void Method::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
@@ -283,8 +288,21 @@ void Method::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors)
 	h.builder.SetInsertPoint(entry_block);
 
 	// Add arguments to scope
-	for (int i = 0, e = f->getFunctionType()->getNumParams(); i < e; ++i)
-		s.push(f->getArg(i)->getName(), f->getArg(i));
+	for (int i = 0, e = f->getFunctionType()->getNumParams(); i < e; ++i) {
+		llvm::Value* arg = f->getArg(i);
+
+		if (isUnit(arg->getType()))
+			s.push(arg->getName(), nullptr);
+		else if (isClass(arg->getType()))
+			s.push(arg->getName(), arg);
+		else {
+			s.push(
+				arg->getName(),
+				h.builder.CreateAlloca(arg->getType())
+			);
+			h.builder.CreateStore(arg, s.get(arg->getName()));
+		}
+	}
 
 	block->codegen(p, h, s, errors);
 
@@ -374,8 +392,8 @@ Class::Class(const string& name, const string& parent, const List<Field>& fields
 	}
 
 /* Methods */
-string Class::to_string(bool with_type) const {
-	return "Class(" + name + "," + parent_name + "," + fields.to_string(with_type) + "," + methods.to_string(with_type) + ")";
+string Class::toString(bool with_type) const {
+	return "Class(" + name + "," + parent_name + "," + fields.toString(with_type) + "," + methods.toString(with_type) + ")";
 }
 
 void Class::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
@@ -644,8 +662,8 @@ Program::Program(const List<Class>& classes): classes(classes) {
 }
 
 /* Methods */
-string Program::to_string(bool with_type) const {
-	return classes.to_string(with_type);
+string Program::toString(bool with_type) const {
+	return classes.toString(with_type);
 }
 
 void Program::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
@@ -729,10 +747,10 @@ void Program::declaration(LLVMHelper& h, vector<Error>& errors) {
 /***** If *****/
 
 /* Methods */
-string If::to_string_aux(bool with_type) const {
-	string str = "If(" + cond->to_string(with_type) + "," + then->to_string(with_type);
+string If::toString_aux(bool with_type) const {
+	string str = "If(" + cond->toString(with_type) + "," + then->toString(with_type);
 	if (els)
-		str += "," + els->to_string(with_type);
+		str += "," + els->toString(with_type);
 	return str + ")";
 }
 
@@ -768,6 +786,9 @@ llvm::Value* If::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>&
 		els->codegen(p, h, s, errors);
 	llvm::BasicBlock* else_bis = h.builder.CreateBr(end_block)->getParent();
 
+	// End block
+	h.builder.SetInsertPoint(end_block);
+
 	// Return type
 	llvm::Type* then_t = then->val ? then->val->getType() : nullptr;
 	llvm::Type* else_t = els and els->val ? els->val->getType() : nullptr;
@@ -781,9 +802,6 @@ llvm::Value* If::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>&
 		errors.push_back({this->line, this->column, "expected agreeing types, but got " + asString(then_t) + " and " + asString(else_t)});
 
 	if (end_t) {
-		// End block
-		h.builder.SetInsertPoint(end_block);
-
 		llvm::Value* then_val = isEqualTo(then_t, end_t) ? then->val : h.builder.CreatePointerCast(then->val, end_t);
 		llvm::Value* else_val = isEqualTo(else_t, end_t) ? els->val : h.builder.CreatePointerCast(els->val, end_t);
 
@@ -792,12 +810,6 @@ llvm::Value* If::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>&
 		phi->addIncoming(else_val, else_bis);
 
 		return phi;
-	} else {
-		h.builder.SetInsertPoint(then_block);
-		h.builder.CreateBr(end_block);
-		h.builder.SetInsertPoint(else_block);
-		h.builder.CreateBr(end_block);
-		h.builder.SetInsertPoint(end_block);
 	}
 
 	return nullptr;
@@ -806,8 +818,8 @@ llvm::Value* If::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>&
 /***** While *****/
 
 /* Methods */
-string While::to_string_aux(bool with_type) const {
-	return "While(" + cond->to_string(with_type) + "," + body->to_string(with_type) + ")";
+string While::toString_aux(bool with_type) const {
+	return "While(" + cond->toString(with_type) + "," + body->toString(with_type) + ")";
 }
 
 llvm::Value* While::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
@@ -849,32 +861,68 @@ llvm::Value* While::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 	return nullptr;
 }
 
+/***** For *****/
+
+/* Methods */
+string For::toString_aux(bool with_type) const {
+	return "For(" + name + "," + first->toString(with_type) + "," + last->toString(with_type) + "," + body->toString(with_type) + ")";
+}
+
+llvm::Value* For::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
+	return Lets(
+		List<Field>({
+			new Field(name, "int32", first),
+			new Field("_last", "int32", last) // underscore starting identifier for privacy
+		}),
+		new While(
+			new Binary(Binary::LOWER_EQUAL, new Identifier(name), new Identifier("_last")),
+			new Block({ // /!\ reversed in constructor
+				make_shared<Assign>(name, new Binary(Binary::PLUS, new Identifier(name), new Integer(1))),
+				body
+			})
+		)
+	).codegen_aux(p, h, s, errors);
+}
+
 /***** Let *****/
 
 /* Methods */
-string Let::to_string_aux(bool with_type) const {
+string Let::toString_aux(bool with_type) const {
 	string str = "Let(" + name + "," + type + ",";
 	if (init)
-		str += init->to_string(with_type) + ",";
-	return str + scope->to_string(with_type) + ")";
+		str += init->toString(with_type) + ",";
+	return str + scope->toString(with_type) + ")";
 }
 
 llvm::Value* Let::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
 	llvm::Type* let_t = asType(h, type);
 
 	if (let_t) {
+		llvm::Value* temp;
+
 		if (init) {
 			init->codegen(p, h, s, errors);
 			llvm::Type* init_t = init->val ? init->val->getType() : nullptr;
 
 			if (isEqualTo(init_t, let_t))
-				s.push(name, init->val);
+				temp = init->val;
 			else if (isSubclassOf(p, init_t, let_t))
-				s.push(name, h.builder.CreatePointerCast(init->val, let_t));
+				temp = h.builder.CreatePointerCast(init->val, let_t);
 			else
 				errors.push_back({init->line, init->column, "expected type " + type + ", but got type " + asString(init_t)});
-		} else
-			s.push(name, defaultValue(h, let_t));
+		}
+
+		if (isUnit(let_t))
+			s.push(name, nullptr);
+		else if (isClass(let_t))
+			s.push(name, temp ? temp : defaultValue(h, let_t));
+		else {
+			s.push(name, h.builder.CreateAlloca(let_t));
+			h.builder.CreateStore(
+				temp ? temp : defaultValue(h, let_t),
+				s.get(name)
+			);
+		}
 	} else
 		errors.push_back({this->line, this->column, "unknown type " + type});
 
@@ -886,11 +934,27 @@ llvm::Value* Let::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>
 	return scope->val;
 }
 
+/***** Lets *****/
+
+/* Methods */
+string Lets::toString_aux(bool with_type) const {
+	return "Lets(" + fields.toString(with_type) + "," + scope->toString(with_type) + ")";
+}
+
+llvm::Value* Lets::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
+	shared_ptr<Expr> x = scope;
+
+	for (auto it = fields.rbegin(); it != fields.rend(); ++it)
+		x = make_shared<Let>((*it)->name, (*it)->type, (*it)->init, x); // recursive
+
+	return x->codegen_aux(p, h, s, errors);
+}
+
 /***** Assign *****/
 
 /* Methods */
-string Assign::to_string_aux(bool with_type) const {
-	return "Assign(" + name + "," + value->to_string(with_type) + ")";
+string Assign::toString_aux(bool with_type) const {
+	return "Assign(" + name + "," + value->toString(with_type) + ")";
 }
 
 llvm::Value* Assign::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
@@ -905,12 +969,16 @@ llvm::Value* Assign::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 	auto it = c->fields_table.find(name);
 
 	// Get target type
-	if (s.contains(name))
+	if (s.contains(name)) {
 		target_t = s.get(name) ? s.get(name)->getType() : nullptr;
-	else if (it != c->fields_table.end())
+		if (target_t and not isClass(target_t))
+			target_t = target_t->getPointerElementType();
+	} else if (it != c->fields_table.end())
 		target_t = it->second->getType(h);
-	else
+	else {
 		errors.push_back({this->line, this->column, "assignation to undeclared identifier " + name});
+		return nullptr;
+	}
 
 	// Cast value to target type
 	llvm::Value* casted;
@@ -923,15 +991,14 @@ llvm::Value* Assign::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 		errors.push_back({value->line, value->column, "expected type " + asString(target_t) + ", but got type " + asString(value_t)});
 
 	// Modify scope
-	if (s.contains(name))
-		s.replace(name, casted);
+	if (isUnit(target_t));
+	else if (s.contains(name))
+		h.builder.CreateStore(casted, s.get(name));
 	else if (it != c->fields_table.end())
 		h.builder.CreateStore(
 			casted,
 			h.builder.CreateStructGEP(self, it->second->idx)
 		);
-	else
-		s.push(name, casted);
 
 	return casted;
 }
@@ -939,14 +1006,14 @@ llvm::Value* Assign::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 /***** Unary *****/
 
 /* Methods */
-string Unary::to_string_aux(bool with_type) const {
+string Unary::toString_aux(bool with_type) const {
 	string str = "UnOp(";
 	switch (type) {
 		case NOT: str += "not"; break;
 		case MINUS: str += "-"; break;
 		case ISNULL: str += "isnull"; break;
 	}
-	return str + "," + value->to_string(with_type) + ")";
+	return str + "," + value->toString(with_type) + ")";
 }
 
 llvm::Value* Unary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
@@ -989,20 +1056,25 @@ llvm::Value* Unary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 /***** Binary *****/
 
 /* Methods */
-string Binary::to_string_aux(bool with_type) const {
+string Binary::toString_aux(bool with_type) const {
 	string str = "BinOp(";
 	switch (type) {
 		case AND: str += "and"; break;
+		case OR: str += "or"; break; // -ext
 		case EQUAL: str += "="; break;
+		case NEQUAL: str += "!="; break; // -ext
 		case LOWER: str += "<"; break;
-		case LOWER_EQUAL: str += "<="; break;
+		case GREATER: str += ">"; break; // -ext
+		case LOWER_EQUAL: str += "<="; break; // -ext
+		case GREATER_EQUAL: str += ">="; break; // -ext
 		case PLUS: str += "+"; break;
 		case MINUS: str += "-"; break;
 		case TIMES: str += "*"; break;
 		case DIV: str += "/"; break;
 		case POW: str += "^"; break;
+		case MOD: str += "mod"; break; // -ext
 	}
-	return str + "," + left->to_string(with_type) + "," + right->to_string(with_type) + ")";
+	return str + "," + left->toString(with_type) + "," + right->toString(with_type) + ")";
 }
 
 llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
@@ -1011,7 +1083,11 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 
 	switch (type) {
 		case AND:
-			return If(left, right, shared_ptr<Expr>(new Boolean(false))).codegen_aux(p, h, s, errors);
+			return If(left, right, make_shared<Boolean>(false)).codegen_aux(p, h, s, errors);
+		case OR:
+			return If(left, make_shared<Boolean>(true), right).codegen_aux(p, h, s, errors);
+		case NEQUAL:
+			return Unary(Unary::NOT, new Binary(EQUAL, left, right)).codegen_aux(p, h, s, errors);
 		default:
 			left->codegen(p, h, s, errors);
 			right->codegen(p, h, s, errors);
@@ -1052,17 +1128,22 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 						switch (type) {
 							case LOWER: return h.builder.CreateICmpSLT(left->val, right->val);
 							case LOWER_EQUAL: return h.builder.CreateICmpSLE(left->val, right->val);
+							case GREATER: return h.builder.CreateICmpSGT(left->val, right->val);
+							case GREATER_EQUAL: return h.builder.CreateICmpSGE(left->val, right->val);
 							case PLUS: return h.builder.CreateAdd(left->val, right->val);
 							case MINUS: return h.builder.CreateSub(left->val, right->val);
 							case TIMES: return h.builder.CreateMul(left->val, right->val);
 							case DIV: return h.builder.CreateSDiv(left->val, right->val);
 							case POW: return nullptr; /* POW TODO */
+							case MOD: return h.builder.CreateSRem(left->val, right->val);
 							default: break;
 						}
 					else {
 						switch (type) {
 							case LOWER:
 							case LOWER_EQUAL:
+							case GREATER:
+							case GREATER_EQUAL:
 								out = defaultValue(h, "bool");
 								break;
 							default:
@@ -1085,10 +1166,14 @@ Call::Call(Expr* scope, const string& name, const List<Expr>& args):
 	scope(scope), name(name), args(args) {
 		reverse(this->args.begin(), this->args.end());
 	}
+Call::Call(shared_ptr<Expr> scope, const string& name, const List<Expr>& args):
+	scope(scope), name(name), args(args) {
+		reverse(this->args.begin(), this->args.end());
+	}
 
 /* Methods */
-string Call::to_string_aux(bool with_type) const {
-	return "Call(" + scope->to_string(with_type) + "," + name + "," + args.to_string(with_type) + ")";
+string Call::toString_aux(bool with_type) const {
+	return "Call(" + scope->toString(with_type) + "," + name + "," + args.toString(with_type) + ")";
 }
 
 llvm::Value* Call::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
@@ -1151,7 +1236,7 @@ llvm::Value* Call::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error
 /***** New *****/
 
 /* Methods */
-string New::to_string_aux(bool with_type) const {
+string New::toString_aux(bool with_type) const {
 	return "New(" + type + ")";
 }
 
@@ -1169,14 +1254,21 @@ llvm::Value* New::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>
 /***** Identifier *****/
 
 /* Methods */
-string Identifier::to_string_aux(bool with_type) const {
+string Identifier::toString_aux(bool with_type) const {
 	return id;
 }
 
 llvm::Value* Identifier::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
 	// Search in scope
-	if (s.contains(id))
-		return s.get(id);
+	if (s.contains(id)) {
+		if (s.get(id)) {
+			if (isClass(s.get(id)->getType()))
+				return s.get(id);
+			else
+				return h.builder.CreateLoad(s.get(id));
+		} else
+			return nullptr;
+	}
 
 	// Search self's fields
 	llvm::Value* self = s.get("self");
@@ -1199,7 +1291,7 @@ llvm::Value* Identifier::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector
 /***** Integer *****/
 
 /* Methods */
-string Integer::to_string_aux(bool with_type) const {
+string Integer::toString_aux(bool with_type) const {
 	return std::to_string(value);
 }
 
@@ -1210,7 +1302,7 @@ llvm::Value* Integer::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Er
 /***** String *****/
 
 /* Methods */
-string String::to_string_aux(bool with_type) const {
+string String::toString_aux(bool with_type) const {
 	string temp;
 	for (const char& c: str)
 		switch (c) {
@@ -1232,7 +1324,7 @@ llvm::Value* String::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 /***** Boolean ****/
 
 /* Methods */
-string Boolean::to_string_aux(bool with_type) const {
+string Boolean::toString_aux(bool with_type) const {
 	return b ? "true" : "false";
 }
 
@@ -1243,7 +1335,7 @@ llvm::Value* Boolean::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Er
 /***** Unit *****/
 
 /* Methods */
-string Unit::to_string_aux(bool with_type) const {
+string Unit::toString_aux(bool with_type) const {
 	return "()";
 }
 

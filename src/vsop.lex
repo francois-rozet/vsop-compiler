@@ -10,6 +10,7 @@
 
 	/* bison global variables */
 	extern int yymode;
+	extern bool yyext;
 
 	/* bison global functions */
 	extern int yyerror(const std::string&);
@@ -66,6 +67,40 @@
 		{"while", WHILE},
 		{"self", SELF}
 	};
+
+	/* extensions */
+	std::unordered_map<std::string, int> extensions = {
+		{"for", FOR},
+		{"lets", LETS},
+		{"mod", MOD},
+		{"or", OR},
+		{"to", TO}
+	};
+
+	/* operators */
+	struct op { int i; std::string s; };
+	std::unordered_map<std::string, op> operators = {
+		{"{", {LBRACE, "lbrace"}},
+		{"}", {RBRACE, "rbrace"}},
+		{"(", {LPAR, "lpar"}},
+		{")", {RPAR, "rpar"}},
+		{":", {COLON, "colon"}},
+		{";", {SEMICOLON, "semicolon"}},
+		{",", {COMMA, "comma"}},
+		{"+", {PLUS, "plus"}},
+		{"-", {MINUS, "minus"}},
+		{"*", {TIMES, "times"}},
+		{"/", {DIV, "div"}},
+		{"^", {POW, "pow"}},
+		{".", {DOT, "dot"}},
+		{"=", {EQUAL, "equal"}},
+		{"<=", {LOWER_EQUAL, "lower-equal"}},
+		{"<-", {ASSIGN, "assign"}},
+		{"<", {LOWER, "lower"}},
+		{">=", {GREATER_EQUAL, "greater-equal"}}, // -ext
+		{">", {GREATER, "greater"}}, // -ext
+		{"!=", {NEQUAL, "not-equal"}} // -ext
+	};
 %}
 
 %option noyywrap
@@ -96,6 +131,9 @@ escape_sequence				\\{escape_char}
 
 single_line_comment			"//"[^\0\n]*
 
+base_operator				"{"|"}"|"("|")"|":"|";"|","|"+"|"-"|"*"|"/"|"^"|"."|"="|"<="|"<-"|"<"
+ext_operator				">="|">"|"!="
+
 %x STRING COMMENT
 %%
 
@@ -114,29 +152,28 @@ single_line_comment			"//"[^\0\n]*
 {whitespace}				/* */
 {single_line_comment}		/* */
 {type_identifier}			yylval.id = strdup(yytext); return TYPE_IDENTIFIER;
-{object_identifier}			yylval.id = strdup(yytext); return keywords.find(yytext) == keywords.end() ? OBJECT_IDENTIFIER : keywords[yytext];
+{object_identifier}			{
+								yylval.id = strdup(yytext);
+								if (keywords.find(yytext) != keywords.end())
+									return keywords[yytext];
+								else if (yyext and extensions.find(yytext) != extensions.end())
+									return extensions[yytext];
+								else
+									return OBJECT_IDENTIFIER;
+							}
 {invalid_integer_literal}	yyerror("lexical error, invalid integer-literal " + std::string(yytext));
 {base16_literal}			yylval.num = str2num(yytext, 16); return INTEGER_LITERAL;
 {base10_literal}			yylval.num = str2num(yytext, 10); return INTEGER_LITERAL;
 \"							yypush(); yybuffer = ""; BEGIN(STRING);
 "(*"						yypush(); BEGIN(COMMENT);
-"{"							yylval.id = strdup("lbrace"); return LBRACE;
-"}"							yylval.id = strdup("rbrace"); return RBRACE;
-"("							yylval.id = strdup("lpar"); return LPAR;
-")"							yylval.id = strdup("rpar"); return RPAR;
-":"							yylval.id = strdup("colon"); return COLON;
-";"							yylval.id = strdup("semicolon"); return SEMICOLON;
-","							yylval.id = strdup("comma"); return COMMA;
-"+"							yylval.id = strdup("plus"); return PLUS;
-"-"							yylval.id = strdup("minus"); return MINUS;
-"*"							yylval.id = strdup("times"); return TIMES;
-"/"							yylval.id = strdup("div"); return DIV;
-"^"							yylval.id = strdup("pow"); return POW;
-"."							yylval.id = strdup("dot"); return DOT;
-"="							yylval.id = strdup("equal"); return EQUAL;
-"<="						yylval.id = strdup("lower-equal"); return LOWER_EQUAL;
-"<-"						yylval.id = strdup("assign"); return ASSIGN;
-"<"							yylval.id = strdup("lower"); return LOWER;
+
+{base_operator}				yylval.id = strdup(operators[yytext].s.c_str()); return operators[yytext].i;
+{ext_operator}				{
+								if (yyext) {
+									yylval.id = strdup(operators[yytext].s.c_str()); return operators[yytext].i;
+								} else
+									yyerror("lexical error, invalid operator " + std::string(yytext));
+							}
 
 <STRING>\"					yypop(); yylval.id = &yybuffer[0]; BEGIN(INITIAL); return STRING_LITERAL;
 <STRING>{regular_char}+		yybuffer += yytext;
