@@ -1,0 +1,10 @@
+class Main {
+    confusingField : unit;
+    confusingMethod( a : int32, b : unit, c : bool ) : bool { b = confusingField }
+
+    main() : int32 {
+        confusingMethod(42, (), true); // valid call
+        confusingMethod(42, true, ()); // invalid call
+        0
+    }
+}

@@ -1,0 +1,10 @@
+extern sin( x : double ) : double;
+extern vararg printf( s : string ) : int32;
+
+class Main {
+    main() : int32 {
+        lets ( x : double <- 728833586, y : double <- 10^9 ) in
+            printf("%f\n", sin(x / y));
+        0
+    }
+}

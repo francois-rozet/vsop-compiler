@@ -1,0 +1,18 @@
+class MyClass {
+    alwaysTrue() : bool { true }
+}
+
+class Main {
+    initialized : MyClass <- new MyClass;
+    uninitialized : MyClass;
+
+    main() : int32 {
+        if (not isnull initialized) and initialized.alwaysTrue() then
+            print("OK\n");
+        if (not isnull uninitialized) and uninitialized.alwaysTrue() then
+            print("KO\n")
+        else
+            print("OK\n");
+        0
+    }
+}

@@ -1,0 +1,26 @@
+isPrime( x : int32 ) : bool {
+    let prime : bool <- x > 1 in {
+        for i <- 2 to x do {
+            if i^2 > x then
+                break
+            else if (x mod i) = 0 then {
+                prime <- false;
+                break
+            }
+        };
+        prime
+    }
+}
+
+class Main {
+    main() : int32 {
+        let sum : int32 in {
+            for i <- 0 to 18 do
+                if isPrime(i) then
+                    sum <- sum + i^2;
+            printInt32(sum)
+        };
+        print("\n");
+        0
+    }
+}

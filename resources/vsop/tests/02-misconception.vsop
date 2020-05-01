@@ -1,0 +1,7 @@
+class Table {
+    NumberOfLegs : int32 <- 4; // type-identifier instead of object-identifier
+}
+
+class Dog extends table {} // object-identifier instead of type-identifier
+
+class Main { main() : int32 { 0 } }

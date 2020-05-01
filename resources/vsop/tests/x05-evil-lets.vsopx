@@ -1,0 +1,8 @@
+class Main {
+    main() : int32 {
+        lets (e : int32 <- 2, v : int32 <- 3, i : int32 <- v, l : int32 <- 37) in
+            printInt32(e * v * i * l);
+        print("\n");
+        0
+    }
+}

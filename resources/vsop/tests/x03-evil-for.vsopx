@@ -1,0 +1,11 @@
+class Main {
+    main() : int32 {
+        let sum : int32 in {
+            for i <- 0 to 36 do
+                sum <- sum + i;
+            printInt32(sum)
+        };
+        print("\n");
+        0
+    }
+}

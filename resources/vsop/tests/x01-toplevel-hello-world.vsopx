@@ -1,0 +1,5 @@
+extern vararg printf( s : string ) : int32;
+
+main() : int32 {
+    printf("Hello, world!\n")
+}
