@@ -15,17 +15,27 @@ using namespace std;
 #include <iostream>
 #include "llvm/Support/raw_ostream.h"
 
-string rso_string;
-llvm::raw_string_ostream rso(rso_string);
+static string rso_string;
+static llvm::raw_string_ostream rso(rso_string);
 
 static void dump(llvm::Type* t) {
-	t->print(rso);
+	if (t) t->print(rso);
 	cout << rso.str() << endl;
+	rso.str().clear();
 }
 
 static void dump(llvm::Value* v) {
-	v->print(rso);
+	if (v) v->print(rso);
 	cout << rso.str() << endl;
+	rso.str().clear();
+}
+
+static void imhere(string str) {
+	cout << str << endl;
+}
+
+static void imhere(int i) {
+	cout << i << endl;
 }
 
 *****/
@@ -202,7 +212,7 @@ string Block::toString_aux(bool with_type) const {
 
 llvm::Value* Block::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
 	exprs.codegen(p, h, s, errors);
-	return exprs.back()->val;
+	return exprs.empty() ? nullptr : exprs.back()->val;
 }
 
 /***** Field *****/
@@ -230,7 +240,7 @@ llvm::Value* Field::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 			errors.push_back({init->line, init->column, "expected type " + type + ", but got type " + asString(init_t)});
 	}
 
-	return defaultValue(h, field_t);
+	return isUnit(field_t) ? nullptr : defaultValue(h, field_t);
 }
 
 void Field::declaration(LLVMHelper& h, vector<Error>& errors) {
@@ -385,7 +395,177 @@ string Class::toString(bool with_type) const {
 }
 
 void Class::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
-	// Initialize
+	// Init
+	llvm::Function* f = h.module.getFunction(name + "_init");
+
+	llvm::BasicBlock* entry_block = llvm::BasicBlock::Create(h.context, "", f);
+	h.builder.SetInsertPoint(entry_block);
+
+	// Call parent's initializer
+	if (parent)
+		h.builder.CreateCall(
+			h.module.getFunction(parent->name + "_init"),
+			{h.builder.CreatePointerCast(
+				f->arg_begin(),
+				parent->getType(h)->getPointerTo()
+			)}
+		);
+
+	// Initialize the fields
+	for (shared_ptr<Field>& field: fields) {
+		field->codegen(p, h, s, errors);
+
+		if (not isUnit(field->getType(h)))
+			h.builder.CreateStore(
+				field->val,
+				h.builder.CreateStructGEP(
+					f->arg_begin(),
+					fields_table[field->name]->idx
+				)
+			);
+	}
+
+	h.builder.CreateRetVoid();
+
+	// New
+	f = h.module.getFunction(name + "_new");
+
+	entry_block = llvm::BasicBlock::Create(h.context, "", f);
+	llvm::BasicBlock* init_block = llvm::BasicBlock::Create(h.context, "init", f);
+	llvm::BasicBlock* null_block = llvm::BasicBlock::Create(h.context, "null", f);
+
+	h.builder.SetInsertPoint(entry_block);
+
+	// Allocation of heap memory
+	size_t alloc_size = h.module.getDataLayout().getTypeAllocSize(this->getType(h));
+	llvm::Value* memory = h.builder.CreateCall(
+		h.module.getOrInsertFunction(
+			"malloc",
+			llvm::FunctionType::get(
+				llvm::Type::getInt8PtrTy(h.context),
+				{llvm::Type::getInt64Ty(h.context)},
+				false
+			)
+		),
+		{llvm::ConstantInt::get(llvm::Type::getInt64Ty(h.context), alloc_size)}
+	);
+
+	// Conditional branching
+	h.builder.CreateCondBr(
+		h.builder.CreateIsNull(memory),
+		null_block,
+		init_block
+	);
+
+	// Initialization block
+	h.builder.SetInsertPoint(init_block);
+
+	llvm::Value* instance = h.builder.CreateBitCast(
+		memory,
+		this->getType(h)->getPointerTo()
+	);
+
+	h.builder.CreateCall(
+		h.module.getFunction(name + "_init"),
+		{instance}
+	);
+
+	h.builder.CreateStore(
+		h.module.getNamedValue("vtable." + name), // vtable
+		h.builder.CreateStructGEP(instance, 0) // vtable slot
+	);
+
+	h.builder.CreateRet(instance);
+
+	// Null block
+	h.builder.SetInsertPoint(null_block);
+	h.builder.CreateRet(
+		llvm::ConstantPointerNull::get(this->getType(h)->getPointerTo())
+	);
+
+	// Methods code generation
+	methods.codegen(p, h, s, errors);
+}
+
+void Class::declaration(LLVMHelper& h, vector<Error>& errors) {
+	// Ensure parent is declared
+	if (parent and not parent->isDeclared(h))
+		parent->declaration(h, errors);
+
+	// Indices
+	unsigned f_idx = 1, m_idx = 0;
+
+	if (parent) {
+		for (auto& it: parent->fields_table)
+			f_idx = max(f_idx, it.second->idx + 1);
+		for (auto& it: parent->methods_table)
+			m_idx = max(m_idx, it.second->idx + 1);
+	}
+
+	// Fields
+	for (auto it = fields.begin(); it != fields.end(); ++it) {
+		(*it)->declaration(h, errors);
+		llvm::Type* t = (*it)->getType(h);
+
+		if (not t) // invalid type
+			it = prev(fields.erase(it));
+		else if (fields_table.find((*it)->name) != fields_table.end()) { // field already exists
+			errors.push_back({(*it)->line, (*it)->column, "redefinition of field " + (*it)->name});
+			it = prev(fields.erase(it));
+		} else if (parent and parent->fields_table.find((*it)->name) != parent->fields_table.end()) { // field already exists in parent
+			errors.push_back({(*it)->line, (*it)->column, "overriding field " + (*it)->name});
+			it = prev(fields.erase(it));
+		} else {
+			fields_table[(*it)->name] = *it;
+			(*it)->idx = isUnit(t) ? f_idx : f_idx++;
+		}
+	}
+
+	if (parent)
+		fields_table.insert(parent->fields_table.begin(), parent->fields_table.end());
+
+	// Methods
+	for (auto it = methods.begin(); it != methods.end(); ++it) {
+		if (methods_table.find((*it)->name) != methods_table.end()) { // method already exists
+			errors.push_back({(*it)->line, (*it)->column, "redefinition of method " + (*it)->name});
+			it = prev(methods.erase(it));
+		} else {
+			(*it)->parent = this;
+			(*it)->declaration(h, errors);
+			llvm::Function* f = (*it)->getFunction(h);
+
+			if (not f) // invalid function
+				it = prev(methods.erase(it));
+			else if (parent and parent->methods_table.find((*it)->name) != parent->methods_table.end()) { // method already exists in parent
+				shared_ptr<Method> m = parent->methods_table[(*it)->name];
+
+				int i = 0;
+				if ((*it)->formals.size() == m->formals.size())
+					for (; i < (*it)->formals.size(); ++i)
+						if ((*it)->formals[i]->type != m->formals[i]->type)
+							break;
+
+				if ((*it)->type == m->type and i == (*it)->formals.size()) {
+					methods_table[(*it)->name] = *it;
+					(*it)->idx = m->idx;
+				} else {
+					errors.push_back({(*it)->line, (*it)->column, "overriding method " + (*it)->name + " with different signature"});
+					f->eraseFromParent();
+					it = prev(methods.erase(it));
+				}
+			} else {
+				methods_table[(*it)->name] = *it;
+				(*it)->idx = m_idx++;
+			}
+		}
+	}
+
+	if (parent)
+		for (auto it = parent->methods_table.begin(); it != parent->methods_table.end(); ++it)
+			if (methods_table.find(it->first) == methods_table.end())
+				methods_table[it->first] = it->second;
+
+	// Initialize struct and vtable types
 	llvm::StructType* self_t = this->getType(h);
 	llvm::StructType* vtable_t = llvm::StructType::create(h.context, this->getName() + "VTable");
 
@@ -447,182 +627,14 @@ void Class::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) 
 		"vtable." + name // Name
 	);
 
-	// Init
-	llvm::Function* f = h.module.getFunction(name + "_init");
-
-	llvm::BasicBlock* entry_block = llvm::BasicBlock::Create(h.context, "", f);
-	h.builder.SetInsertPoint(entry_block);
-
-	// Call parent's initializer
-	h.builder.CreateCall(
-		h.module.getFunction(parent->name + "_init"),
-		{h.builder.CreatePointerCast(
-			f->arg_begin(),
-			parent->getType(h)->getPointerTo()
-		)}
-	);
-
-	// Initialize the fields
-	for (shared_ptr<Field>& field: fields) {
-		field->codegen(p, h, s, errors);
-
-		if (not isUnit(field->getType(h)))
-			h.builder.CreateStore(
-				field->val,
-				h.builder.CreateStructGEP(
-					f->arg_begin(),
-					fields_table[field->name]->idx
-				)
-			);
-	}
-
-	h.builder.CreateRetVoid();
-
 	// New
-	f = h.module.getFunction(name + "_new");
-
-	entry_block = llvm::BasicBlock::Create(h.context, "", f);
-	llvm::BasicBlock* init_block = llvm::BasicBlock::Create(h.context, "init", f);
-	llvm::BasicBlock* null_block = llvm::BasicBlock::Create(h.context, "null", f);
-
-	h.builder.SetInsertPoint(entry_block);
-
-	// Allocation of heap memory
-	size_t alloc_size = h.module.getDataLayout().getTypeAllocSize(self_t);
-	llvm::Value* memory = h.builder.CreateCall(
-		h.module.getOrInsertFunction(
-			"malloc",
-			llvm::FunctionType::get(
-				llvm::Type::getInt8PtrTy(h.context),
-				{llvm::Type::getInt64Ty(h.context)},
-				false
-			)
-		),
-		{llvm::ConstantInt::get(llvm::Type::getInt64Ty(h.context), alloc_size)}
-	);
-
-	// Conditional branching
-	h.builder.CreateCondBr(
-		h.builder.CreateIsNull(memory),
-		null_block,
-		init_block
-	);
-
-	// Initialization block
-	h.builder.SetInsertPoint(init_block);
-
-	llvm::Value* instance = h.builder.CreateBitCast(
-		memory,
-		self_t->getPointerTo()
-	);
-
-	h.builder.CreateCall(
-		h.module.getFunction(name + "_init"),
-		{instance}
-	);
-
-	h.builder.CreateStore(
-		h.module.getNamedValue("vtable." + name), // vtable
-		h.builder.CreateStructGEP(instance, 0) // vtable slot
-	);
-
-	h.builder.CreateRet(instance);
-
-	// Null block
-	h.builder.SetInsertPoint(null_block);
-	h.builder.CreateRet(
-		llvm::ConstantPointerNull::get(self_t->getPointerTo())
-	);
-
-	// Methods code generation
-	methods.codegen(p, h, s, errors);
-}
-
-void Class::declaration(LLVMHelper& h, vector<Error>& errors) {
-	// Ensure parent is declared
-	if (parent and not parent->isDeclared(h))
-		parent->declaration(h, errors);
-
-	// Indices
-	unsigned f_idx = 1, m_idx = 0;
-
-	if (parent) {
-		for (auto& it: parent->fields_table)
-			f_idx = max(f_idx, it.second->idx + 1);
-		for (auto& it: parent->methods_table)
-			m_idx = max(m_idx, it.second->idx + 1);
-	}
-
-	// Fields
-	for (auto it = fields.begin(); it != fields.end(); ++it) {
-		(*it)->declaration(h, errors);
-		llvm::Type* t = (*it)->getType(h);
-
-		if (not t) // invalid type
-			it = prev(fields.erase(it));
-		else if (fields_table.find((*it)->name) != fields_table.end()) { // field already exists
-			errors.push_back({(*it)->line, (*it)->column, "redefinition of field " + (*it)->name});
-			it = prev(fields.erase(it));
-		} else if (parent and parent->fields_table.find((*it)->name) != parent->fields_table.end()) { // field already exists in parent
-			errors.push_back({(*it)->line, (*it)->column, "overriding field " + (*it)->name});
-			it = prev(fields.erase(it));
-		} else {
-			fields_table[(*it)->name] = *it;
-			(*it)->idx = isUnit(t) ? f_idx : f_idx++;
-		}
-	}
-
-	if (parent)
-		fields_table.insert(parent->fields_table.begin(), parent->fields_table.end());
-
-	// Methods
-	for (auto it = methods.begin(); it != methods.end(); ++it) {
-		(*it)->parent = this;
-		(*it)->declaration(h, errors);
-		llvm::Function* f = (*it)->getFunction(h);
-
-		if (not f) // invalid function
-			it = prev(methods.erase(it));
-		else if (methods_table.find((*it)->name) != methods_table.end()) { // method already exists
-			errors.push_back({(*it)->line, (*it)->column, "redefinition of method " + (*it)->name});
-			f->eraseFromParent();
-			it = prev(methods.erase(it));
-		} else if (parent and parent->methods_table.find((*it)->name) != parent->methods_table.end()) { // method already exists in parent
-			shared_ptr<Method> m = parent->methods_table[(*it)->name];
-
-			int i = 0;
-			if ((*it)->formals.size() == m->formals.size())
-				for (; i < (*it)->formals.size(); ++i)
-					if ((*it)->formals[i]->type != m->formals[i]->type)
-						break;
-
-			if ((*it)->type == m->type and i == (*it)->formals.size()) {
-				methods_table[(*it)->name] = *it;
-				(*it)->idx = m->idx;
-			} else {
-				errors.push_back({(*it)->line, (*it)->column, "overriding method " + (*it)->name + " with different signature"});
-				f->eraseFromParent();
-				it = prev(methods.erase(it));
-			}
-		} else {
-			methods_table[(*it)->name] = *it;
-			(*it)->idx = m_idx++;
-		}
-	}
-
-	if (parent)
-		for (auto it = parent->methods_table.begin(); it != parent->methods_table.end(); ++it)
-			if (methods_table.find(it->first) == methods_table.end())
-				methods_table[it->first] = it->second;
-
-	// New
-	llvm::FunctionType* ft = llvm::FunctionType::get(this->getType(h)->getPointerTo(), false);
+	llvm::FunctionType* ft = llvm::FunctionType::get(self_t->getPointerTo(), false);
 	llvm::Function* f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name + "_new", h.module);
 
 	// Init
 	ft = llvm::FunctionType::get(
 		llvm::Type::getVoidTy(h.context),
-		{this->getType(h)->getPointerTo()},
+		{self_t->getPointerTo()},
 		false
 	);
 	f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name + "_init", h.module);
@@ -785,16 +797,13 @@ llvm::Value* If::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>&
 	// Then block
 	h.builder.SetInsertPoint(then_block);
 	then->codegen(p, h, s, errors);
-	llvm::BasicBlock* then_bis = h.builder.CreateBr(end_block)->getParent();
+	llvm::BasicBlock* then_bis = h.builder.GetInsertBlock();
 
 	// Else block
 	h.builder.SetInsertPoint(else_block);
 	if (els)
 		els->codegen(p, h, s, errors);
-	llvm::BasicBlock* else_bis = h.builder.CreateBr(end_block)->getParent();
-
-	// End block
-	h.builder.SetInsertPoint(end_block);
+	llvm::BasicBlock* else_bis = h.builder.GetInsertBlock();
 
 	// Return type
 	llvm::Type* then_t = then->val ? then->val->getType() : nullptr;
@@ -808,10 +817,25 @@ llvm::Value* If::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>&
 	else if (not isUnit(then_t) and not isUnit(else_t))
 		errors.push_back({this->line, this->column, "expected agreeing types, but got " + asString(then_t) + " and " + asString(else_t)});
 
-	if (end_t) {
-		llvm::Value* then_val = isEqualTo(then_t, end_t) ? then->val : h.builder.CreatePointerCast(then->val, end_t);
-		llvm::Value* else_val = isEqualTo(else_t, end_t) ? els->val : h.builder.CreatePointerCast(els->val, end_t);
+	llvm::Value* then_val = nullptr;
+	llvm::Value* else_val = nullptr;
 
+	// Then block
+	h.builder.SetInsertPoint(then_bis);
+	if (not isUnit(end_t))
+		then_val = isEqualTo(then_t, end_t) ? then->val : h.builder.CreatePointerCast(then->val, end_t);
+	h.builder.CreateBr(end_block);
+
+	// Else block
+	h.builder.SetInsertPoint(else_bis);
+	if (not isUnit(end_t))
+		else_val = isEqualTo(else_t, end_t) ? els->val : h.builder.CreatePointerCast(els->val, end_t);
+	h.builder.CreateBr(end_block);
+
+	// End block
+	h.builder.SetInsertPoint(end_block);
+
+	if (not isUnit(end_t)) {
 		auto* phi = h.builder.CreatePHI(end_t, 2);
 		phi->addIncoming(then_val, then_bis);
 		phi->addIncoming(else_val, else_bis);
@@ -905,7 +929,7 @@ llvm::Value* Let::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>
 	llvm::Type* let_t = asType(h, type);
 
 	if (let_t) {
-		llvm::Value* temp;
+		llvm::Value* temp = nullptr;
 
 		if (init) {
 			init->codegen(p, h, s, errors);
@@ -972,39 +996,40 @@ llvm::Value* Assign::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 
 	// Search self's fields
 	llvm::Value* self = s.get("self");
-	shared_ptr<Class> c = p->classes_table[asString(self->getType())];
-	auto it = c->fields_table.find(name);
+	shared_ptr<Class> c = self ? p->classes_table[asString(self->getType())] : nullptr;
 
 	// Get target type
 	if (s.contains(name)) {
 		target_t = s.get(name) ? s.get(name)->getType() : nullptr;
 		if (target_t and not isClass(target_t))
 			target_t = target_t->getPointerElementType();
-	} else if (it != c->fields_table.end())
-		target_t = it->second->getType(h);
+	} else if (c and c->fields_table.find(name) != c->fields_table.end())
+		target_t = c->fields_table[name]->getType(h);
 	else {
 		errors.push_back({this->line, this->column, "assignation to undeclared identifier " + name});
 		return nullptr;
 	}
 
 	// Cast value to target type
-	llvm::Value* casted;
+	llvm::Value* casted = nullptr;
 
 	if (isEqualTo(value_t, target_t))
 		casted = value->val;
 	else if (isSubclassOf(p, value_t, target_t))
 		casted = h.builder.CreatePointerCast(value->val, target_t);
-	else
+	else {
 		errors.push_back({value->line, value->column, "expected type " + asString(target_t) + ", but got type " + asString(value_t)});
+		return nullptr;
+	}
 
 	// Modify scope
 	if (isUnit(target_t));
 	else if (s.contains(name))
 		h.builder.CreateStore(casted, s.get(name));
-	else if (it != c->fields_table.end())
+	else if (c and c->fields_table.find(name) != c->fields_table.end())
 		h.builder.CreateStore(
 			casted,
-			h.builder.CreateStructGEP(self, it->second->idx)
+			h.builder.CreateStructGEP(self, c->fields_table[name]->idx)
 		);
 
 	return casted;
@@ -1027,7 +1052,7 @@ llvm::Value* Unary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 	value->codegen(p, h, s, errors);
 	llvm::Type* value_t = value->val ? value->val->getType() : nullptr;
 
-	llvm::Value* out;
+	llvm::Value* out = nullptr;
 	string expected;
 
 	switch (type) {
@@ -1085,7 +1110,7 @@ string Binary::toString_aux(bool with_type) const {
 }
 
 llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
-	llvm::Value* out;
+	llvm::Value* out = nullptr;
 	string expected;
 
 	switch (type) {
@@ -1105,10 +1130,10 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 			switch (type) {
 				case EQUAL:
 					if (isEqualTo(left_t, right_t)) {
-						if (isString(left_t))
-							return h.builder.CreateCall(
+						if (isString(left_t)) {
+							llvm::Value* comp = h.builder.CreateCall(
 								h.module.getOrInsertFunction(
-									"strcomp",
+									"strcmp",
 									llvm::FunctionType::get(
 										llvm::Type::getInt32Ty(h.context),
 										{
@@ -1120,12 +1145,18 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 								),
 								{left->val, right->val}
 							);
-						else if (isUnit(left_t))
+
+							return h.builder.CreateICmpEQ(comp, Integer(0).codegen_aux(p, h, s, errors));
+						} else if (isUnit(left_t))
 							return llvm::ConstantInt::getTrue(h.context);
 						else
 							return h.builder.CreateICmpEQ(left->val, right->val);
 					} else if (isClass(left_t) and isClass(right_t)) {
-						return h.builder.CreateICmpEQ(left->val, right->val);
+						llvm::Type* comm_t = commonAncestor(p, left_t, left_t)->getType(h)->getPointerTo();
+						llvm::Value* left_bis = isEqualTo(left_t, comm_t) ? left->val : h.builder.CreatePointerCast(left->val, comm_t);
+						llvm::Value* right_bis = isEqualTo(right_t, comm_t) ? right->val : h.builder.CreatePointerCast(right->val, comm_t);
+
+						return h.builder.CreateICmpEQ(left_bis, right_bis);
 					} else
 						errors.push_back({this->line, this->column, "expected agreeing types, but got " + asString(left_t) + " and " + asString(right_t)});
 
@@ -1180,8 +1211,8 @@ llvm::Value* Call::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error
 	args.codegen(p, h, s, errors);
 
 	if (isClass(scope_t)) {
-		llvm::Function* f;
-		llvm::FunctionType* ft;
+		llvm::Function* f = nullptr;
+		llvm::FunctionType* ft = nullptr;
 		vector<llvm::Value*> params;
 
 		// Get scope class type
@@ -1280,16 +1311,12 @@ llvm::Value* Identifier::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector
 
 	// Search self's fields
 	llvm::Value* self = s.get("self");
-	if (self) {
-		shared_ptr<Class> c = p->classes_table[asString(self->getType())];
+	shared_ptr<Class> c = self ? p->classes_table[asString(self->getType())] : nullptr;
 
-		auto it = c->fields_table.find(id);
-		if (it != c->fields_table.end()) {
-			return h.builder.CreateLoad(
-				h.builder.CreateStructGEP(self, it->second->idx)
-			); // self->id
-		}
-	}
+	if (c and c->fields_table.find(id) != c->fields_table.end())
+		return h.builder.CreateLoad(
+			h.builder.CreateStructGEP(self, c->fields_table[id]->idx)
+		); // self->id
 
 	errors.push_back({this->line, this->column, "use of undeclared identifier " + id});
 
