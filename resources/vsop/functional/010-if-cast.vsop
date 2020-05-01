@@ -1,0 +1,15 @@
+class Parent {
+    name() : string { "Parent" }
+}
+class Child extends Parent {
+    name() : string { "Child" }
+}
+class Main {
+    main() : int32 {
+        print((if true then new Parent else new Child).name());
+        print("\n");
+        print((if false then new Parent else new Child).name());
+        print("\n");
+        0
+    }
+}

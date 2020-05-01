@@ -1,0 +1,10 @@
+class Main {
+    uninitialized : Object; // should be default-initialized to null
+    initialilzed : Object <- new Object;
+
+    main() : int32 {
+        if isnull uninitialized then print("OK\n") else print("KO\n");
+        if isnull initialilzed then print("KO\n") else print("OK\n");
+        0
+    }
+}

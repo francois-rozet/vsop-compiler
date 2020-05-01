@@ -1,0 +1,7 @@
+class Main {
+    main() : int32 {
+        printBool(true);
+        print("\n");
+        0
+    }
+}

@@ -1,0 +1,12 @@
+class Main {
+    main() : int32 {
+        if "" = "" then print("OK\n") else print("KO\n");
+        if "" = "a" then print("KO\n") else print("OK\n");
+        if "a" = "" then print("KO\n") else print("OK\n");
+        if "hello" = "hello" then print("OK\n") else print("KO\n");
+        if "hello" = "hello and more" then print("KO\n") else print("OK\n");
+        if "hello and more" = "hello" then print("KO\n") else print("OK\n");
+        if "a" = "b" then print("KO\n") else print("OK\n");
+        0
+    }
+}
