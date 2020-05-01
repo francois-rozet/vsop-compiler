@@ -404,7 +404,7 @@ string Class::toString(bool with_t) const {
 
 void Class::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
 	// Init
-	llvm::Function* f = h.module.getFunction(name + "_init");
+	llvm::Function* f = h.module.getFunction(name + "__init");
 
 	llvm::BasicBlock* entry_block = llvm::BasicBlock::Create(h.context, "", f);
 	h.builder.SetInsertPoint(entry_block);
@@ -412,7 +412,7 @@ void Class::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) 
 	// Call parent's initializer
 	if (parent)
 		h.builder.CreateCall(
-			h.module.getFunction(parent->name + "_init"),
+			h.module.getFunction(parent->name + "__init"),
 			{h.builder.CreatePointerCast(
 				f->arg_begin(),
 				parent->getType(h)->getPointerTo()
@@ -436,7 +436,7 @@ void Class::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) 
 	h.builder.CreateRetVoid();
 
 	// New
-	f = h.module.getFunction(name + "_new");
+	f = h.module.getFunction(name + "__new");
 
 	entry_block = llvm::BasicBlock::Create(h.context, "", f);
 	llvm::BasicBlock* init_block = llvm::BasicBlock::Create(h.context, "init", f);
@@ -474,7 +474,7 @@ void Class::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) 
 	);
 
 	h.builder.CreateCall(
-		h.module.getFunction(name + "_init"),
+		h.module.getFunction(name + "__init"),
 		{instance}
 	);
 
@@ -638,7 +638,7 @@ void Class::declaration(LLVMHelper& h, vector<Error>& errors) {
 
 	// New
 	llvm::FunctionType* ft = llvm::FunctionType::get(self_t->getPointerTo(), false);
-	llvm::Function* f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name + "_new", h.module);
+	llvm::Function* f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name + "__new", h.module);
 
 	// Init
 	ft = llvm::FunctionType::get(
@@ -646,7 +646,7 @@ void Class::declaration(LLVMHelper& h, vector<Error>& errors) {
 		{self_t->getPointerTo()},
 		false
 	);
-	f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name + "_init", h.module);
+	f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name + "__init", h.module);
 	f->arg_begin()->setName("self");
 }
 
@@ -655,7 +655,7 @@ string Class::getName() const {
 }
 
 bool Class::isDeclared(LLVMHelper& h) const {
-	return h.module.getFunction(name + "_new");
+	return h.module.getFunction(name + "__new");
 }
 
 llvm::StructType* Class::getType(LLVMHelper& h) const {
@@ -1304,7 +1304,7 @@ string New::toString_aux(bool with_t) const {
 }
 
 llvm::Value* New::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
-	llvm::Function* f = h.module.getFunction(type + "_new");
+	llvm::Function* f = h.module.getFunction(type + "__new");
 
 	if (not f) {
 		errors.push_back({this->line, this->column, "new instance of unknown object type '" + type + "'"});

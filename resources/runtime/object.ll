@@ -245,14 +245,14 @@ define i32 @Object_inputInt32(%struct.Object*) {
 
 ; Object constructor and initializer
 
-define %struct.Object* @Object_new() {
+define %struct.Object* @Object__new() {
   %1 = call i8* @malloc(i64 8)
   %2 = bitcast i8* %1 to %struct.Object*
-  %3 = call %struct.Object* @Object_init(%struct.Object* %2)
+  %3 = call %struct.Object* @Object__init(%struct.Object* %2)
   ret %struct.Object* %3
 }
 
-define %struct.Object* @Object_init(%struct.Object*) {
+define %struct.Object* @Object__init(%struct.Object*) {
   %2 = icmp ne %struct.Object* %0, null
   br i1 %2, label %3, label %5
 
