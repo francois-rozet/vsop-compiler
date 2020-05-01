@@ -49,6 +49,10 @@ static bool isInteger(llvm::Type* t) {
 	return t and t->isIntegerTy(32);
 }
 
+static bool isReal(llvm::Type* t) {
+	return t and t->isDoubleTy();
+}
+
 static bool isBoolean(llvm::Type* t) {
 	return t and t->isIntegerTy(1);
 }
@@ -61,13 +65,18 @@ static bool isClass(llvm::Type* t) {
 	return t and t->isPointerTy() and t->getPointerElementType()->isStructTy();
 }
 
+static bool isNumeric(llvm::Type* t) {
+	return isInteger(t) or isReal(t);
+}
+
 static bool isPrimitive(llvm::Type* t) {
-	return isInteger(t) or isBoolean(t) or isString(t);
+	return isNumeric(t) or isBoolean(t) or isString(t);
 }
 
 static bool isEqualTo(llvm::Type* a, llvm::Type* b) {
 	bool cond = isUnit(a) and isUnit(b);
 	cond = cond or (isInteger(a) and isInteger(b));
+	cond = cond or (isReal(a) and isReal(b));
 	cond = cond or (isBoolean(a) and isBoolean(b));
 	cond = cond or (isString(a) and isString(b));
 	cond = cond or (isClass(a) and isClass(b) and a->getPointerElementType() == b->getPointerElementType());
@@ -80,6 +89,8 @@ static llvm::Type* asType(LLVMHelper& h, const string& t) {
 		return llvm::Type::getVoidTy(h.context);
 	else if (t == "int32")
 		return llvm::Type::getInt32Ty(h.context);
+	else if (t == "double")
+		return llvm::Type::getDoubleTy(h.context);
 	else if (t == "bool")
 		return llvm::Type::getInt1Ty(h.context);
 	else if (t == "string")
@@ -92,14 +103,17 @@ static llvm::Type* asType(LLVMHelper& h, const string& t) {
 static string asString(llvm::Type* t) {
 	if (isUnit(t))
 		return "unit";
-	if (isInteger(t))
+	else if (isInteger(t))
 		return "int32";
+	else if (isReal(t))
+		return "double";
 	else if (isBoolean(t))
 		return "bool";
 	else if (isString(t))
 		return "string";
 
-	return t->getPointerElementType()->getStructName().str().substr(7, string::npos);
+	string str = t->getPointerElementType()->getStructName().str();
+	return str.substr(str.find_first_of('.') + 1, string::npos);
 }
 
 static bool isSubclassOf_aux(Class* a, Class* b) {
@@ -148,6 +162,22 @@ static llvm::Value* defaultValue(LLVMHelper& h, llvm::Type* t) {
 
 static llvm::Value* defaultValue(LLVMHelper& h, const string& t) {
 	return defaultValue(h, asType(h, t));
+}
+
+static llvm::Value* numericCast(LLVMHelper& h, llvm::Value* v, llvm::Type* t=nullptr) {
+	llvm::Type* value_t = v ? v->getType() : nullptr;
+
+	if (not t)
+		t = llvm::Type::getDoubleTy(h.context);
+
+	if (isInteger(value_t) and isReal(t))
+		return h.builder.CreateSIToFP(v, t);
+	else if (isReal(value_t) and isInteger(t))
+		return h.builder.CreateFPToSI(v, t);
+	else if (isEqualTo(value_t, t))
+		return v;
+
+	return nullptr;
 }
 
 /***** Scope *****/
@@ -254,6 +284,8 @@ llvm::Value* Field::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 
 		if (isEqualTo(init_t, field_t))
 			return init->val;
+		else if (isNumeric(init_t) and isNumeric(field_t))
+			return numericCast(h, init->val, field_t);
 		else if (isSubclassOf(p, init_t, field_t))
 			return h.builder.CreatePointerCast(init->val, field_t);
 		else
@@ -326,6 +358,8 @@ void Method::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors)
 
 	if (isEqualTo(block_t, return_t))
 		h.builder.CreateRet(block->val);
+	else if (isNumeric(block_t) and isNumeric(return_t))
+		h.builder.CreateRet(numericCast(h, block->val, return_t));
 	else if (isSubclassOf(p, block_t, return_t))
 		h.builder.CreateRet(h.builder.CreatePointerCast(block->val, return_t));
 	else {
@@ -818,30 +852,32 @@ llvm::Value* If::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>&
 	llvm::BasicBlock* else_bis = h.builder.GetInsertBlock();
 
 	// Return type
-	llvm::Type* then_t = then->val ? then->val->getType() : nullptr;
-	llvm::Type* else_t = els and els->val ? els->val->getType() : nullptr;
+	llvm::Value* then_val = then->val;
+	llvm::Value* else_val = els ? els->val : nullptr;
+
+	llvm::Type* then_t = then_val ? then_val->getType() : nullptr;
+	llvm::Type* else_t = else_val ? else_val->getType() : nullptr;
 	llvm::Type* end_t = nullptr;
 
 	if (isEqualTo(then_t, else_t))
 		end_t = then_t;
+	else if (isNumeric(then_t) and isNumeric(else_t))
+		end_t = llvm::Type::getDoubleTy(h.context);
 	else if (isClass(then_t) and isClass(else_t))
 		end_t = commonAncestor(p, then_t, else_t)->getType(h)->getPointerTo();
 	else if (not isUnit(then_t) and not isUnit(else_t))
 		errors.push_back({this->line, this->column, "expected agreeing branch types, but got types '" + asString(then_t) + "' and '" + asString(else_t) + "'"});
 
-	llvm::Value* then_val = nullptr;
-	llvm::Value* else_val = nullptr;
-
 	// Then block
 	h.builder.SetInsertPoint(then_bis);
-	if (not isUnit(end_t))
-		then_val = isEqualTo(then_t, end_t) ? then->val : h.builder.CreatePointerCast(then->val, end_t);
+	if (not isUnit(end_t) and not isEqualTo(then_t, end_t))
+		then_val = isNumeric(end_t) ? numericCast(h, then_val, end_t) : h.builder.CreatePointerCast(then_val, end_t);
 	h.builder.CreateBr(end_block);
 
 	// Else block
 	h.builder.SetInsertPoint(else_bis);
-	if (not isUnit(end_t))
-		else_val = isEqualTo(else_t, end_t) ? els->val : h.builder.CreatePointerCast(els->val, end_t);
+	if (not isUnit(end_t) and not isEqualTo(else_t, end_t))
+		else_val = isNumeric(end_t) ? numericCast(h, else_val, end_t) : h.builder.CreatePointerCast(else_val, end_t);
 	h.builder.CreateBr(end_block);
 
 	// End block
@@ -977,6 +1013,8 @@ llvm::Value* Let::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>
 
 			if (isEqualTo(init_t, let_t))
 				temp = init->val;
+			else if (isNumeric(init_t) and isNumeric(let_t))
+				temp = numericCast(h, init->val, let_t);
 			else if (isSubclassOf(p, init_t, let_t))
 				temp = h.builder.CreatePointerCast(init->val, let_t);
 			else
@@ -1045,6 +1083,8 @@ llvm::Value* Assign::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 
 	if (isEqualTo(value_t, target_t))
 		casted = value->val;
+	else if (isNumeric(value_t) and isNumeric(target_t))
+		casted = numericCast(h, value->val, target_t);
 	else if (isSubclassOf(p, value_t, target_t))
 		casted = h.builder.CreatePointerCast(value->val, target_t);
 	else {
@@ -1097,11 +1137,11 @@ llvm::Value* Unary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 			}
 			break;
 		case MINUS:
-			if (isInteger(value_t))
+			if (isNumeric(value_t))
 				return h.builder.CreateNeg(value->val);
 			else {
 				out = defaultValue(h, "int32");
-				expected = "int32";
+				expected = "int32 or double";
 			}
 			break;
 		case ISNULL:
@@ -1178,12 +1218,19 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 								{left->val, right->val}
 							);
 
-							return h.builder.CreateICmpEQ(comp, Integer(0).codegen_aux(p, h, s, errors));
+							return h.builder.CreateICmpEQ(comp, defaultValue(h, "int32"));
 						} else if (isUnit(left_t))
 							return llvm::ConstantInt::getTrue(h.context);
-						else
+						else if (isInteger(left_t) or isBoolean(left_t))
 							return h.builder.CreateICmpEQ(left->val, right->val);
-					} else if (isClass(left_t) and isClass(right_t)) {
+						else
+							return h.builder.CreateFCmpOEQ(left->val, right->val);
+					} else if (isNumeric(left_t) and isNumeric(right_t))
+						return h.builder.CreateFCmpOEQ(
+							numericCast(h, left->val),
+							numericCast(h, right->val)
+						);
+					else if (isClass(left_t) and isClass(right_t)) {
 						llvm::Type* comm_t = commonAncestor(p, left_t, left_t)->getType(h)->getPointerTo();
 						llvm::Value* left_bis = isEqualTo(left_t, comm_t) ? left->val : h.builder.CreatePointerCast(left->val, comm_t);
 						llvm::Value* right_bis = isEqualTo(right_t, comm_t) ? right->val : h.builder.CreatePointerCast(right->val, comm_t);
@@ -1194,7 +1241,7 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 
 					return defaultValue(h, "bool");
 				default:
-					if (isInteger(left_t) and isInteger(right_t))
+					if (isInteger(left_t) and isInteger(right_t)) {
 						switch (type) {
 							case LOWER: return h.builder.CreateICmpSLT(left->val, right->val);
 							case LOWER_EQUAL: return h.builder.CreateICmpSLE(left->val, right->val);
@@ -1231,7 +1278,38 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 							case MOD: return h.builder.CreateSRem(left->val, right->val);
 							default: break;
 						}
-					else {
+					} else if (isNumeric(left_t) and isNumeric(right_t)) {
+						llvm::Value* left_bis = numericCast(h, left->val);
+						llvm::Value* right_bis = numericCast(h, right->val);
+
+						switch (type) {
+							case LOWER: return h.builder.CreateFCmpOLT(left_bis, right_bis);
+							case LOWER_EQUAL: return h.builder.CreateFCmpOLE(left_bis, right_bis);
+							case GREATER: return h.builder.CreateFCmpOGT(left_bis, right_bis);
+							case GREATER_EQUAL: return h.builder.CreateFCmpOGE(left_bis, right_bis);
+							case PLUS: return h.builder.CreateFAdd(left_bis, right_bis);
+							case MINUS: return h.builder.CreateFSub(left_bis, right_bis);
+							case TIMES: return h.builder.CreateFMul(left_bis, right_bis);
+							case DIV: return h.builder.CreateFDiv(left_bis, right_bis);
+							case POW:
+								return h.builder.CreateCall(
+									h.module.getOrInsertFunction(
+										"llvm.pow.f64",
+										llvm::FunctionType::get(
+											llvm::Type::getDoubleTy(h.context),
+											{
+												llvm::Type::getDoubleTy(h.context),
+												llvm::Type::getDoubleTy(h.context),
+											},
+											false
+										)
+									),
+									{left_bis, right_bis}
+								);
+							case MOD: return h.builder.CreateFRem(left_bis, right_bis);
+							default: break;
+						}
+					} else {
 						switch (type) {
 							case LOWER:
 							case LOWER_EQUAL:
@@ -1242,7 +1320,7 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 							default:
 								out = defaultValue(h, "int32");
 						}
-						expected = "int32";
+						expected = "int32 or double";
 					}
 			}
 
@@ -1306,6 +1384,8 @@ llvm::Value* Call::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error
 
 					if (isEqualTo(arg_t, param_t))
 						params.push_back(args[i]->val);
+					else if (isNumeric(arg_t) and isNumeric(param_t))
+						params.push_back(numericCast(h, args[i]->val, param_t));
 					else if (isSubclassOf(p, arg_t, param_t))
 						params.push_back(
 							h.builder.CreatePointerCast(
@@ -1388,6 +1468,28 @@ llvm::Value* Integer::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Er
 	return llvm::ConstantInt::get(llvm::Type::getInt32Ty(h.context), value);
 }
 
+/***** Real *****/
+
+/* Methods */
+string Real::toString_aux(bool with_t) const {
+	return std::to_string(value);
+}
+
+llvm::Value* Real::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
+	return llvm::ConstantFP::get(llvm::Type::getDoubleTy(h.context), value);
+}
+
+/***** Boolean ****/
+
+/* Methods */
+string Boolean::toString_aux(bool with_t) const {
+	return b ? "true" : "false";
+}
+
+llvm::Value* Boolean::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
+	return b ? llvm::ConstantInt::getTrue(h.context) : llvm::ConstantInt::getFalse(h.context);
+}
+
 /***** String *****/
 
 /* Methods */
@@ -1408,17 +1510,6 @@ string String::toString_aux(bool with_t) const {
 
 llvm::Value* String::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
 	return h.builder.CreateGlobalStringPtr(str, "str");
-}
-
-/***** Boolean ****/
-
-/* Methods */
-string Boolean::toString_aux(bool with_t) const {
-	return b ? "true" : "false";
-}
-
-llvm::Value* Boolean::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
-	return b ? llvm::ConstantInt::getTrue(h.context) : llvm::ConstantInt::getFalse(h.context);
 }
 
 /***** Unit *****/

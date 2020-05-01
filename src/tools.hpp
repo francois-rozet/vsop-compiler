@@ -20,8 +20,12 @@ static char hex2char(std::string s) {
 	return std::strtol(&s[0], NULL, 16);
 }
 
-static int str2num(const char* s, uint base) {
+static int str2int(const char* s, uint base) {
 	return std::strtol(s, NULL, base);
+}
+
+static double str2double(const char* s, uint base) {
+	return std::stod(s);
 }
 
 static char esc2char(const char* s) {

@@ -455,13 +455,13 @@ class Integer: public Expr {
 		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 };
 
-class String: public Expr {
+class Real: public Expr {
 	public:
 		/* Constructors */
-		String(const std::string& str): str(str) {}
+		Real(double value): value(value) {}
 
 		/* Fields */
-		std::string str;
+		double value;
 
 		/* Methods */
 		virtual std::string toString_aux(bool) const;
@@ -475,6 +475,20 @@ class Boolean: public Expr {
 
 		/* Fields */
 		bool b;
+
+		/* Methods */
+		virtual std::string toString_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
+};
+
+
+class String: public Expr {
+	public:
+		/* Constructors */
+		String(const std::string& str): str(str) {}
+
+		/* Fields */
+		std::string str;
 
 		/* Methods */
 		virtual std::string toString_aux(bool) const;

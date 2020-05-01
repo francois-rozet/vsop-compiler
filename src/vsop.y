@@ -9,7 +9,8 @@
 
 %union // yylval
 {
-	int num;
+	int int32;
+	double doubl;
 	char* id;
 	Class* clas;
 	Class::Definition* defn;
@@ -67,7 +68,8 @@
 
 %token END 0 "end-of-file"
 
-%token <num> INTEGER_LITERAL "integer-literal"
+%token <int32> INTEGER_LITERAL "integer-literal"
+%token <doubl> REAL_LITERAL "real-literal" // /!\ tweak lexer to support
 %token <id> STRING_LITERAL "string-literal"
 %token <id> TYPE_IDENTIFIER "type-identifier"
 %token <id> OBJECT_IDENTIFIER "object-identifier"
@@ -77,6 +79,7 @@
 %token <id> BREAK "break" // -ext
 %token <id> CLASS "class"
 %token <id> DO "do"
+%token <id> DOUBLE "double" // -ext
 %token <id> ELSE "else"
 %token <id> EXTENDS "extends"
 %token <id> EXTERN "extern" // -ext
@@ -168,7 +171,7 @@ token:			/* */
 
 object:			OBJECT_IDENTIFIER | "self";
 
-keyword:		"and" | "bool" | "break" | "class" | "do" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
+keyword:		"and" | "bool" | "break" | "class" | "do" | "double" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
 
 program:		class
 				{ yyclasses.add($1); }
@@ -273,6 +276,7 @@ type_id:		TYPE_IDENTIFIER
 
 type:			type_id
 				| "int32"
+				| "double"
 				| "bool"
 				| "string"
 				| "unit";

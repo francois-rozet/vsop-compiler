@@ -71,6 +71,7 @@
 	/* extensions */
 	std::unordered_map<std::string, int> extensions = {
 		{"break", BREAK},
+		{"double", DOUBLE},
 		{"extern", EXTERN},
 		{"for", FOR},
 		{"lets", LETS},
@@ -103,6 +104,16 @@
 		{">", {GREATER, "greater"}}, // -ext
 		{"!=", {NEQUAL, "not-equal"}} // -ext
 	};
+
+	/* /!\ copy paste at line 136 to support doubles parsing
+	real_literal				({digit}+.{digit}*)|(.{digit}+)
+	invalid_real_literal		{real_literal}({letter}|_)
+	*/
+
+	/* /!\ copy paste at line 181 to support doubles parsing
+	{invalid_real_literal}		yyerror("lexical error, invalid real-literal " + std::string(yytext));
+	{real_literal}				yylval.doubl = str2double(yytext); return REAL_LITERAL;
+	*/
 %}
 
 %option noyywrap
@@ -167,9 +178,11 @@ ext_operator				">="|">"|"!="
 								else
 									return OBJECT_IDENTIFIER;
 							}
+
 {invalid_integer_literal}	yyerror("lexical error, invalid integer-literal " + std::string(yytext));
-{base16_literal}			yylval.num = str2num(yytext, 16); return INTEGER_LITERAL;
-{base10_literal}			yylval.num = str2num(yytext, 10); return INTEGER_LITERAL;
+{base16_literal}			yylval.int32 = str2int(yytext, 16); return INTEGER_LITERAL;
+{base10_literal}			yylval.int32 = str2int(yytext, 10); return INTEGER_LITERAL;
+
 \"							yypush(); yybuffer = ""; BEGIN(STRING);
 "(*"						yypush(); BEGIN(COMMENT);
 
