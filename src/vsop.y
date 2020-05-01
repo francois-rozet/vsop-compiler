@@ -44,6 +44,7 @@
 
 	/* flex global variables */
 	extern FILE* yyin;
+	extern bool yyext;
 
 	/* bison variables */
 	int yyerrs = 0;
@@ -93,7 +94,6 @@
 %token <id> OR "or" // -ext
 %token <id> SELF "self"
 %token <id> SSTRING "string"
-%token <id> STATIC "static" // -ext
 %token <id> THEN "then"
 %token <id> TO "to" // -ext
 %token <id> TRUE "true"
@@ -129,7 +129,7 @@
 %nterm <defn> class-aux
 %nterm <field> field
 %nterm <fields> fields fields-aux // -ext
-%nterm <method> method interface
+%nterm <method> method prototype
 %nterm <formals> formals formals-aux
 %nterm <formal> formal
 %nterm <block> block block-aux args args-aux
@@ -168,7 +168,7 @@ token:			/* */
 
 object:			OBJECT_IDENTIFIER | "self";
 
-keyword:		"and" | "bool" | "break" | "class" | "do" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "static" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
+keyword:		"and" | "bool" | "break" | "class" | "do" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
 
 program:		class
 				{ yyclasses.add($1); }
@@ -188,10 +188,8 @@ extended:		extended-aux
 
 extended-aux:	class
 				{ yyclasses.add($1); }
-				| "static" method
-				{ yyfunctions.add($2); }
-				| "extern" interface ";"
-				{ yyfunctions.add($2); };
+				| method
+				{ yyfunctions.add($1); };
 
 class:			"class" type_id class-parent "{" class-aux
 				{ $$ = new Class($2, $3, $5->fields, $5->methods); yylocate($$, @$); delete $5; };
@@ -235,11 +233,13 @@ fields-aux:		field ")"
 				| error "," fields-aux
 				{ $$ = $3; yyerrok; };
 
-interface:		object_id formals ":" type
+prototype:		object_id formals ":" type
 				{ $$ = new Method($1, *$2, $4, NULL); yylocate($$, @$); delete $2; };
 
-method:			interface block
-				{ $1->block = std::make_shared<Block>(*$2); $$ = $1; yylocate($$->block.get(), @2); delete $2; };
+method:			prototype block
+				{ $1->block = std::make_shared<Block>(*$2); $$ = $1; yylocate($$->block.get(), @2); delete $2; }
+				| "extern" prototype ";"
+				{ $$ = $2; };
 
 formal:			object_id ":" type // possible improvement -> merge field and formal
 				{ $$ = new Formal($1, $3); yylocate($$, @$); };
@@ -398,7 +398,7 @@ literal:		INTEGER_LITERAL
 call:			expr "." object_id args
 				{ $$ = new Call($1, $3, *$4); delete $4; }
 				| object_id args
-				{ $$ = new Call(new Self(), $1, *$2); delete $2; };
+				{ $$ = new Call(yyext ? (Expr*) new Unit() : (Expr*) new Self(), $1, *$2); delete $2; };
 
 args:			"(" ")"
 				{ $$ = new List<Expr>(); }

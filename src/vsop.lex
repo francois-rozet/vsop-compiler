@@ -76,7 +76,6 @@
 		{"lets", LETS},
 		{"mod", MOD},
 		{"or", OR},
-		{"static", STATIC},
 		{"to", TO}
 	};
 

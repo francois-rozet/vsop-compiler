@@ -110,8 +110,6 @@ class Expr: public Node {
 		virtual void codegen(Program* p, LLVMHelper& h, Scope& s, std::vector<Error>& errors) {
 			val = this->codegen_aux(p, h, s, errors);
 		}
-
-		virtual bool isSelf() const { return false; };
 };
 
 class Block: public Expr {
@@ -442,9 +440,6 @@ class Self: public Identifier {
 	public:
 		/* Constructors */
 		Self(): Identifier("self") {}
-
-		/* Methods */
-		virtual bool isSelf() const { return true; };
 };
 
 class Integer: public Expr {

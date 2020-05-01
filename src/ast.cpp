@@ -680,14 +680,18 @@ void Program::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors
 	functions.codegen(p, h, s, errors);
 
 	// Main
-	if (classes_table.find("Main") != classes_table.end()) {
+	if (functions_table.find("main") != functions_table.end()) {
+		shared_ptr<Method> m = functions_table["main"];
+
+		if (m->formals.size() != 0 or m->type != "int32")
+			errors.push_back({m->line, m->column, "function " + m->getName(true) + " declared with wrong signature"});
+	} else if (classes_table.find("Main") != classes_table.end()) {
 		shared_ptr<Class> c = classes_table["Main"];
 
 		if (c->methods_table.find("main") != c->methods_table.end()) {
 			shared_ptr<Method> m = c->methods_table["main"];
 
-			if (m->formals.size() == 0 and m->type == "int32") {
-				// int32 main()
+			if (m->formals.size() == 0 and m->type == "int32") { // main() : int32
 				llvm::FunctionType* ft = llvm::FunctionType::get(
 					llvm::Type::getInt32Ty(h.context), {}, false
 				);
@@ -1261,31 +1265,34 @@ llvm::Value* Call::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error
 
 	args.codegen(p, h, s, errors);
 
-	if (isClass(scope_t)) {
+	if (isUnit(scope_t) or isClass(scope_t)) {
 		llvm::Function* f = nullptr;
 		llvm::FunctionType* ft = nullptr;
 		vector<llvm::Value*> params;
 
-		// Get scope object type
-		shared_ptr<Class> c = p->classes_table[asString(scope_t)];
-
-		if (c->methods_table.find(name) != c->methods_table.end()) { // class method
-			f = (llvm::Function*) h.builder.CreateLoad(
-				h.builder.CreateStructGEP(
-					h.builder.CreateLoad(
-						h.builder.CreateStructGEP(scope->val, 0)
-					), // scope->vtable
-					c->methods_table[name]->idx
-				)
-			); // vtable->method
-
-			ft = (llvm::FunctionType*) f->getType()->getPointerElementType();
-
-			// Add scope as self param
-			params.push_back(scope->val);
-		} else if (scope->isSelf() and p->functions_table.find(name) != p->functions_table.end()) { // top-level function
+		if (isUnit(scope_t) and p->functions_table.find(name) != p->functions_table.end()) { // top-level function
 			f = p->functions_table[name]->getFunction(h);
 			ft = f->getFunctionType();
+		} else if (not isUnit(scope_t) or s.contains("self")) {
+			llvm::Value* obj = isUnit(scope_t) ? s.load(h, "self") : scope->val;
+
+			shared_ptr<Class> c = p->classes_table[asString(obj->getType())];
+
+			if (c->methods_table.find(name) != c->methods_table.end()) { // class method
+				f = (llvm::Function*) h.builder.CreateLoad(
+					h.builder.CreateStructGEP(
+						h.builder.CreateLoad(
+							h.builder.CreateStructGEP(obj, 0)
+						), // obj->vtable
+						c->methods_table[name]->idx
+					)
+				); // vtable->method
+
+				ft = (llvm::FunctionType*) f->getType()->getPointerElementType();
+
+				// Add obj as self param
+				params.push_back(obj);
+			}
 		}
 
 		if (f) {
