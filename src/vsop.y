@@ -73,6 +73,7 @@
 
 %token <id> AND "and"
 %token <id> BOOL "bool"
+%token <id> BREAK "break" // -ext
 %token <id> CLASS "class"
 %token <id> DO "do"
 %token <id> ELSE "else"
@@ -167,7 +168,7 @@ token:			/* */
 
 object:			OBJECT_IDENTIFIER | "self";
 
-keyword:		"and" | "bool" | "class" | "do" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "static" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
+keyword:		"and" | "bool" | "break" | "class" | "do" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "static" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
 
 program:		class
 				{ yyclasses.add($1); }
@@ -304,6 +305,8 @@ expr:			expr-aux
 expr-aux:		if
 				| while
 				| for
+				| "break"
+				{ $$ = new Break(); }
 				| let
 				| lets
 				| unary

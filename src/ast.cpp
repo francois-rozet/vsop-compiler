@@ -1,7 +1,6 @@
 #include "ast.hpp"
 #include "tools.hpp"
 
-#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -868,7 +867,10 @@ llvm::Value* While::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 	// While blocks
 	llvm::BasicBlock* cond_block = llvm::BasicBlock::Create(h.context, "cond", f);
 	llvm::BasicBlock* body_block = llvm::BasicBlock::Create(h.context, "body", f);
-	llvm::BasicBlock* end_block = llvm::BasicBlock::Create(h.context, "end", f);
+	llvm::BasicBlock* exit_block = llvm::BasicBlock::Create(h.context, "exit", f);
+
+	// (-ext) Push break point
+	h.exits.push_back(exit_block);
 
 	h.builder.CreateBr(cond_block);
 
@@ -885,7 +887,7 @@ llvm::Value* While::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 	h.builder.CreateCondBr(
 		isBoolean(cond_t) ? cond->val : llvm::ConstantInt::getFalse(h.context),
 		body_block,
-		end_block
+		exit_block
 	);
 
 	// Body block
@@ -895,8 +897,33 @@ llvm::Value* While::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Erro
 
 	h.builder.CreateBr(cond_block);
 
-	// End block
-	h.builder.SetInsertPoint(end_block);
+	// Exit block
+	h.builder.SetInsertPoint(exit_block);
+
+	// (-ext) Pop break point
+	h.exits.pop_back();
+
+	return nullptr;
+}
+
+/***** Break *****/
+
+/* Methods */
+string Break::toString_aux(bool with_t) const {
+	return "break";
+}
+
+llvm::Value* Break::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
+	if (not h.exits.empty()) {
+		// Jump to exit branch
+		h.builder.CreateBr(h.exits.back());
+
+		// Dump all following instructions in unreachable block
+		h.builder.SetInsertPoint(
+			llvm::BasicBlock::Create(h.context, "unreachable", h.exits.back()->getParent())
+		);
+	} else
+		errors.push_back({this->line, this->column, "break outside loop"});
 
 	return nullptr;
 }

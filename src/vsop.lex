@@ -70,6 +70,7 @@
 
 	/* extensions */
 	std::unordered_map<std::string, int> extensions = {
+		{"break", BREAK},
 		{"extern", EXTERN},
 		{"for", FOR},
 		{"lets", LETS},

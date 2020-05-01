@@ -1,6 +1,7 @@
 #ifndef AST_H
 #define AST_H
 
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
@@ -17,6 +18,7 @@ struct LLVMHelper {
 	llvm::LLVMContext& context;
 	llvm::IRBuilder<>& builder;
 	llvm::Module& module;
+	std::vector<llvm::BasicBlock*> exits;
 };
 
 class Scope: std::unordered_map<std::string, std::vector<llvm::Value*>> {
@@ -281,6 +283,13 @@ class While: public Expr {
 		/* Fields */
 		std::shared_ptr<Expr> cond, body;
 
+		/* Methods */
+		virtual std::string toString_aux(bool) const;
+		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
+};
+
+class Break: public Expr {
+	public:
 		/* Methods */
 		virtual std::string toString_aux(bool) const;
 		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
