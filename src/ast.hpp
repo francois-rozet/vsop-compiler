@@ -47,7 +47,7 @@ class Node {
 		int line = 1, column = 1;
 
 		/* Methods */
-		virtual std::string toString(bool) const = 0;
+		virtual std::string toString(bool with_t=false) const = 0;
 		virtual void codegen(Program* p, LLVMHelper& h, Scope& s, std::vector<Error>& e) {}
 };
 
@@ -74,14 +74,14 @@ class List: public std::vector<std::shared_ptr<T>>, public Node {
 			return *this;
 		}
 
-		virtual std::string toString(bool with_type) const {
+		virtual std::string toString(bool with_t=false) const {
 			if (this->empty())
 				return "[]";
 
-			std::string str = "[" + this->front()->toString(with_type);
+			std::string str = "[" + this->front()->toString(with_t);
 
 			for (auto it = this->begin() + 1; it != this->end(); ++it)
-				str += "," + (*it)->toString(with_type);
+				str += "," + (*it)->toString(with_t);
 
 			return str + "]";
 		}
@@ -98,8 +98,8 @@ class Expr: public Node {
 		llvm::Value* val;
 
 		/* Methods */
-		virtual std::string toString_aux(bool) const = 0;
-		virtual std::string toString(bool) const;
+		virtual std::string toString_aux(bool with_t=false) const = 0;
+		virtual std::string toString(bool with_t=false) const;
 
 		virtual llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&) = 0;
 		virtual void codegen(Program* p, LLVMHelper& h, Scope& s, std::vector<Error>& errors) {
@@ -140,7 +140,7 @@ class Field: public Node {
 		unsigned idx;
 
 		/* Methods */
-		virtual std::string toString(bool) const;
+		virtual std::string toString(bool with_t=false) const;
 
 		llvm::Value* codegen_aux(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 		virtual void codegen(Program* p, LLVMHelper& h, Scope& s, std::vector<Error>& errors) {
@@ -161,7 +161,7 @@ class Formal: public Node {
 		std::string name, type;
 
 		/* Methods */
-		virtual std::string toString(bool) const;
+		virtual std::string toString(bool with_t=false) const;
 
 		void declaration(LLVMHelper&, std::vector<Error>&);
 
@@ -191,12 +191,12 @@ class Method: public Node {
 		unsigned idx;
 
 		/* Methods */
-		virtual std::string toString(bool) const;
+		virtual std::string toString(bool with_t=false) const;
 		virtual void codegen(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 
 		void declaration(LLVMHelper&, std::vector<Error>&);
 
-		std::string getName() const;
+		std::string getName(bool cpp=false) const;
 		llvm::Function* getFunction(LLVMHelper&) const;
 		llvm::FunctionType* getType(LLVMHelper&) const;
 };
@@ -223,7 +223,7 @@ class Class: public Node {
 		Class* parent;
 
 		/* Methods */
-		virtual std::string toString(bool) const;
+		virtual std::string toString(bool with_t=false) const;
 		virtual void codegen(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 
 		void declaration(LLVMHelper&, std::vector<Error>&);
@@ -248,7 +248,7 @@ class Program: public Node {
 		std::unordered_map<std::string, std::shared_ptr<Method>> functions_table;
 
 		/* Methods */
-		virtual std::string toString(bool) const;
+		virtual std::string toString(bool with_t=false) const;
 		virtual void codegen(Program*, LLVMHelper&, Scope&, std::vector<Error>&);
 
 		void declaration(LLVMHelper&, std::vector<Error>&);

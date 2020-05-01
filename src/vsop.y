@@ -155,9 +155,9 @@ start:			START_LEXER token
 
 token:			/* */
 				| token INTEGER_LITERAL
-				{ yyprint("integer-literal," + Integer($2).toString(false)); }
+				{ yyprint("integer-literal," + Integer($2).toString()); }
 				| token STRING_LITERAL
-				{ yyprint("string-literal," + String($2).toString(false));  }
+				{ yyprint("string-literal," + String($2).toString());  }
 				| token TYPE_IDENTIFIER
 				{ yyprint("type-identifier," + std::string($2)); }
 				| token object
@@ -238,7 +238,7 @@ interface:		object_id formals ":" type
 				{ $$ = new Method($1, *$2, $4, NULL); yylocate($$, @$); delete $2; };
 
 method:			interface block
-				{ $1->block = std::make_shared<Block>(*$2); $$ = $1; delete $2; };
+				{ $1->block = std::make_shared<Block>(*$2); $$ = $1; yylocate($$->block.get(), @2); delete $2; };
 
 formal:			object_id ":" type // possible improvement -> merge field and formal
 				{ $$ = new Formal($1, $3); yylocate($$, @$); };
