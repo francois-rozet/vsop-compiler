@@ -13,26 +13,29 @@
 #include <unordered_map>
 #include <memory>
 
+struct LLVMHelper {
+	llvm::LLVMContext& context;
+	llvm::IRBuilder<>& builder;
+	llvm::Module& module;
+};
+
 class Scope: std::unordered_map<std::string, std::vector<llvm::Value*>> {
 	public:
 		/* Methods */
-		Scope& push(const std::string&, llvm::Value*);
-		Scope& pop(const std::string&);
-		Scope& replace(const std::string&, llvm::Value*);
+		llvm::Value* push(const std::string&, llvm::Value*);
+		llvm::Value* pop(const std::string&);
+		llvm::Value* alloc(LLVMHelper& h, const std::string&, llvm::Type*);
+		llvm::Value* store(LLVMHelper& h, const std::string&, llvm::Value*);
 		bool contains(const std::string&) const;
 		llvm::Value* get(const std::string&) const;
+		llvm::Type* getType(const std::string&) const;
+		llvm::Value* load(LLVMHelper& h, const std::string&) const;
 };
 
 struct Error {
 	int line;
 	int column;
 	std::string msg;
-};
-
-struct LLVMHelper {
-	llvm::LLVMContext& context;
-	llvm::IRBuilder<>& builder;
-	llvm::Module& module;
 };
 
 class Program; // forward declaration

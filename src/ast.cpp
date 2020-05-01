@@ -154,31 +154,41 @@ static llvm::Value* defaultValue(LLVMHelper& h, const string& t) {
 /***** Scope *****/
 
 /* Methods */
-Scope& Scope::push(const string& name, llvm::Value* value) {
+llvm::Value* Scope::push(const string& name, llvm::Value* ptr) {
 	if (this->contains(name))
-		this->at(name).push_back(value);
+		this->at(name).push_back(ptr);
 	else
-		this->insert({name, {value}});
+		this->insert({name, {ptr}});
 
-	return *this;
+	return this->get(name);
 }
 
-Scope& Scope::pop(const string& name) {
+llvm::Value* Scope::pop(const string& name) {
+	llvm::Value* ptr = nullptr;
+
 	if (this->contains(name)) {
+		ptr = this->at(name).back();
+
 		if (this->at(name).size() > 1)
 			this->at(name).pop_back();
 		else
 			this->erase(name);
 	}
 
-	return *this;
+	return ptr;
 }
 
-Scope& Scope::replace(const string& name, llvm::Value* value) {
-	if (this->contains(name))
-		this->at(name).back() = value;
+llvm::Value* Scope::alloc(LLVMHelper& h,const string& name, llvm::Type* type) {
+	return this->push(
+		name,
+		isUnit(type) ? nullptr : h.builder.CreateAlloca(type)
+	);
+}
 
-	return *this;
+llvm::Value* Scope::store(LLVMHelper& h, const string& name, llvm::Value* value) {
+	if (llvm::Value* ptr = this->get(name))
+		return h.builder.CreateStore(value, ptr)->getOperand(0);
+	return nullptr;
 }
 
 bool Scope::contains(const string& name) const {
@@ -188,6 +198,18 @@ bool Scope::contains(const string& name) const {
 llvm::Value* Scope::get(const string& name) const {
 	if (this->contains(name))
 		return this->at(name).back();
+	return nullptr;
+}
+
+llvm::Type* Scope::getType(const string& name) const {
+	if (llvm::Value* ptr = this->get(name))
+		return ptr->getType()->getPointerElementType();
+	return nullptr;
+}
+
+llvm::Value* Scope::load(LLVMHelper& h, const string& name) const {
+	if (llvm::Value* ptr = this->get(name))
+		return h.builder.CreateLoad(ptr);
 	return nullptr;
 }
 
@@ -288,19 +310,8 @@ void Method::codegen(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors)
 
 	// Add arguments to scope
 	for (auto& it: f->args()) {
-		llvm::Value* arg = &it;
-
-		if (isUnit(arg->getType()))
-			s.push(arg->getName(), nullptr);
-		else if (isClass(arg->getType()))
-			s.push(arg->getName(), arg);
-		else {
-			s.push(
-				arg->getName(),
-				h.builder.CreateAlloca(arg->getType())
-			);
-			h.builder.CreateStore(arg, s.get(arg->getName()));
-		}
+		s.alloc(h, it.getName(), it.getType());
+		s.store(h, it.getName(), &it);
 	}
 
 	// Method block
@@ -941,24 +952,16 @@ llvm::Value* Let::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>
 				errors.push_back({init->line, init->column, "expected type '" + type + "', but got initializer of type '" + asString(init_t) + "'"});
 		}
 
-		if (isUnit(let_t))
-			s.push(name, nullptr);
-		else if (isClass(let_t))
-			s.push(name, temp ? temp : defaultValue(h, let_t));
-		else {
-			s.push(name, h.builder.CreateAlloca(let_t));
-			h.builder.CreateStore(
-				temp ? temp : defaultValue(h, let_t),
-				s.get(name)
-			);
-		}
+		// Allocate and store variable
+		s.alloc(h, name, let_t);
+		s.store(h, name, temp ? temp : defaultValue(h, let_t));
 	} else
 		errors.push_back({this->line, this->column, "unknown type '" + type + "'"});
 
 	scope->codegen(p, h, s, errors);
 
-	if (s.contains(name))
-		s.pop(name);
+	// Remove variable from scope
+	s.pop(name);
 
 	return scope->val;
 }
@@ -990,18 +993,16 @@ llvm::Value* Assign::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 	value->codegen(p, h, s, errors);
 	llvm::Type* value_t = value->val ? value->val->getType() : nullptr;
 
-	llvm::Type* target_t = value_t;
-
 	// Search self's fields
-	llvm::Value* self = s.get("self");
-	shared_ptr<Class> c = self ? p->classes_table[asString(self->getType())] : nullptr;
+	llvm::Type* self_t = s.getType("self");
+	shared_ptr<Class> c = self_t ? p->classes_table[asString(self_t)] : nullptr;
 
 	// Get target type
-	if (s.contains(name)) {
-		target_t = s.get(name) ? s.get(name)->getType() : nullptr;
-		if (target_t and not isClass(target_t))
-			target_t = target_t->getPointerElementType();
-	} else if (c and c->fields_table.find(name) != c->fields_table.end())
+	llvm::Type* target_t = nullptr;
+
+	if (s.contains(name))
+		target_t = s.getType(name);
+	else if (c and c->fields_table.find(name) != c->fields_table.end())
 		target_t = c->fields_table[name]->getType(h);
 	else {
 		errors.push_back({this->line, this->column, "assignation to undeclared identifier " + name});
@@ -1020,14 +1021,16 @@ llvm::Value* Assign::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 		return nullptr;
 	}
 
-	// Modify scope
-	if (isUnit(target_t));
-	else if (s.contains(name))
-		h.builder.CreateStore(casted, s.get(name));
-	else if (c and c->fields_table.find(name) != c->fields_table.end())
+	// Store casted value
+	if (s.contains(name))
+		s.store(h, name, casted);
+	else if (not isUnit(target_t))
 		h.builder.CreateStore(
 			casted,
-			h.builder.CreateStructGEP(self, c->fields_table[name]->idx)
+			h.builder.CreateStructGEP(
+				s.load(h, "self"),
+				c->fields_table[name]->idx
+			)
 		);
 
 	return casted;
@@ -1319,24 +1322,20 @@ string Identifier::toString_aux(bool with_t) const {
 }
 
 llvm::Value* Identifier::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error>& errors) {
-	// Search in scope
-	if (s.contains(id)) {
-		if (s.get(id)) {
-			if (isClass(s.get(id)->getType()))
-				return s.get(id);
-			else
-				return h.builder.CreateLoad(s.get(id));
-		} else
-			return nullptr;
-	}
+	// Load from scope
+	if (s.contains(id))
+		return s.load(h, id);
 
 	// Search self's fields
-	llvm::Value* self = s.get("self");
-	shared_ptr<Class> c = self ? p->classes_table[asString(self->getType())] : nullptr;
+	llvm::Type* self_t = s.getType("self");
+	shared_ptr<Class> c = self_t ? p->classes_table[asString(self_t)] : nullptr;
 
 	if (c and c->fields_table.find(id) != c->fields_table.end())
 		return h.builder.CreateLoad(
-			h.builder.CreateStructGEP(self, c->fields_table[id]->idx)
+			h.builder.CreateStructGEP(
+				s.load(h, "self"),
+				c->fields_table[id]->idx
+			)
 		); // self->id
 
 	errors.push_back({this->line, this->column, "undeclared identifier " + id});
