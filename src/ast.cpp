@@ -1172,7 +1172,30 @@ llvm::Value* Binary::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Err
 							case MINUS: return h.builder.CreateSub(left->val, right->val);
 							case TIMES: return h.builder.CreateMul(left->val, right->val);
 							case DIV: return h.builder.CreateSDiv(left->val, right->val);
-							case POW: return nullptr; /* POW TODO */
+							case POW:
+								return h.builder.CreateFPToSI(
+									h.builder.CreateCall(
+										h.module.getOrInsertFunction(
+											"llvm.powi.f64",
+											llvm::FunctionType::get(
+												llvm::Type::getDoubleTy(h.context),
+												{
+													llvm::Type::getDoubleTy(h.context),
+													llvm::Type::getInt32Ty(h.context),
+												},
+												false
+											)
+										),
+										{
+											h.builder.CreateSIToFP(
+												left->val,
+												llvm::Type::getDoubleTy(h.context)
+											),
+											right->val
+										}
+									),
+									llvm::Type::getInt32Ty(h.context)
+								);
 							case MOD: return h.builder.CreateSRem(left->val, right->val);
 							default: break;
 						}
