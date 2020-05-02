@@ -1,5 +1,5 @@
 %{
-	#define YY_USER_ACTION yyupdate();
+	#define YY_USER_ACTION yyupdate(); // execute yyupdate() after each matched rule
 
 	#include "tools.hpp"
 	#include "vsop.tab.h"
@@ -8,18 +8,40 @@
 	#include <vector>
 	#include <unordered_map>
 
-	/* bison global variables */
-	extern int yymode;
-	bool yyext = false;
+	/* vsopc */
 
-	/* bison global functions */
+	extern int yymode;
+
+	/* bison */
+
 	extern int yyerror(const std::string&);
 
-	/* flex global variables */
+	/* flex */
+
+	/// Extensions trigger
+	bool yyext = false;
+
+	/**
+	 * String buffer
+	 *
+	 * It is used for tokens parsed in several rule matches, like strings.
+	 */
 	std::string yybuffer;
+
+	/**
+	 * Location stack
+	 *
+	 * It is used to remember nested encapsulated environment (e.g. comments)
+	 * starting locations. When the end of an environment is reached, its
+	 * starting location is poped, so that only unterminated environments remain.
+	 *
+	 * @see yypush and yypop
+	 */
 	std::vector<YYLTYPE> yystack;
 
-	/* flex functions */
+	/**
+	 * Update the location window according to token length and content
+	 */
 	void yyupdate() {
 		yylloc.first_line = yylloc.last_line;
 		yylloc.first_column = yylloc.last_column;
@@ -32,10 +54,16 @@
 				++yylloc.last_column;
 	}
 
+	/// Push a new location in 'yystack'
 	void yypush() {
 		yystack.push_back(yylloc);
 	}
 
+	/**
+	 * Pop the last stored location in 'yystack'
+	 *
+	 * @remark Also updates the location window to include the environment.
+	 */
 	void yypop() {
 		YYLTYPE back = yystack.back();
 		yystack.pop_back();
@@ -44,7 +72,11 @@
 		yylloc.first_column = back.first_column;
 	}
 
-	/* keywords */
+	/**
+	 * Keywords of the VSOP language
+	 *
+	 * @note Hash-tables allows O(1) lookups.
+	 */
 	std::unordered_map<std::string, int> keywords = {
 		{"and", AND},
 		{"bool", BOOL},
@@ -68,7 +100,7 @@
 		{"self", SELF}
 	};
 
-	/* extensions */
+	/// Additional keywords of the extended VSOP language
 	std::unordered_map<std::string, int> extensions = {
 		{"break", BREAK},
 		{"double", DOUBLE},
@@ -81,7 +113,11 @@
 		{"vararg", VARARG}
 	};
 
-	/* operators */
+	/**
+	 * Operators of the VSOP language
+	 *
+	 * @note Both legacy and extended operators are in this table.
+	 */
 	struct op { int i; std::string s; };
 	std::unordered_map<std::string, op> operators = {
 		{"{", {LBRACE, "lbrace"}},
@@ -106,14 +142,14 @@
 		{"!=", {NEQUAL, "not-equal"}} // -ext
 	};
 
-	/* /!\ copy paste at line 136 to support doubles parsing
-	real_literal				({digit}+.{digit}*)|(.{digit}+)
-	invalid_real_literal		{real_literal}({letter}|_)
-	*/
-
-	/* /!\ copy paste at line 181 to support doubles parsing
-	{invalid_real_literal}		yyerror("lexical error, invalid real-literal " + std::string(yytext));
-	{real_literal}				yylval.doubl = str2double(yytext); return REAL_LITERAL;
+	/* /!\ copy paste at line 224 to support doubles parsing
+	{real_literal}{base_identifier}* {
+								yylval.doubl = str2maybedouble(yytext);
+								if (yylval.doubl < 0)
+									yyerror("lexical error, invalid real-literal " + std::string(yytext));
+								else
+									return REAL_LITERAL;
+							}
 	*/
 %}
 
@@ -133,7 +169,8 @@ hex_prefix					"0x"
 base10_literal				{digit}+
 base16_literal				{hex_prefix}{hex_digit}+
 integer_literal				{base10_literal}|{base16_literal}
-invalid_integer_literal		{integer_literal}([g-z]|[G-Z]|_)
+
+real_literal				({digit}+"."{digit}*)|("."{digit}+)
 
 base_identifier				{letter}|{digit}|_
 type_identifier				{uppercase_letter}{base_identifier}*
@@ -152,6 +189,7 @@ ext_operator				">="|">"|"!="
 %%
 
 %{
+	// switch bison parsing mode (-lex, -parse, -ext, ...)
 	switch(yymode) {
 		case START_LEXER:
 			yymode = 0;
@@ -159,10 +197,14 @@ ext_operator				">="|">"|"!="
 		case START_PARSER:
 			yymode = 0;
 			return START_PARSER;
-		case START_EXTENDED:
+		case START_EXT_LEXER:
 			yymode = 0;
 			yyext = true;
-			return START_EXTENDED;
+			return START_EXT_LEXER;
+		case START_EXT_PARSER:
+			yymode = 0;
+			yyext = true;
+			return START_EXT_PARSER;
 		default: break;
 	}
 %}
@@ -180,9 +222,13 @@ ext_operator				">="|">"|"!="
 									return OBJECT_IDENTIFIER;
 							}
 
-{invalid_integer_literal}	yyerror("lexical error, invalid integer-literal " + std::string(yytext));
-{base16_literal}			yylval.int32 = str2int(yytext, 16); return INTEGER_LITERAL;
-{base10_literal}			yylval.int32 = str2int(yytext, 10); return INTEGER_LITERAL;
+{integer_literal}{base_identifier}* {
+								yylval.int32 = str2maybeint(yytext);
+								if (yylval.int32 < 0)
+									yyerror("lexical error, invalid integer-literal " + std::string(yytext));
+								else
+									return INTEGER_LITERAL;
+							}
 
 \"							yypush(); yybuffer = ""; BEGIN(STRING);
 "(*"						yypush(); BEGIN(COMMENT);

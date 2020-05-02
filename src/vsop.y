@@ -13,7 +13,7 @@
 	double doubl;
 	char* id;
 	Class* clas;
-	Class::Definition* defn;
+	ClassDefinition* defn;
 	Field* field;
 	List<Field>* fields;
 	Method* method;
@@ -38,19 +38,26 @@
 %locations // yylloc
 
 %{
-	/* main gloabl variables */
+	/* vsopc */
+
 	extern int yymode;
 	extern List<Class> yyclasses;
 	extern List<Method> yyfunctions;
 
-	/* flex global variables */
+	/* flex */
+
 	extern FILE* yyin;
 	extern bool yyext;
 
-	/* bison variables */
+	/* bison */
+
+	/**
+	 * Number of error messages sent
+	 *
+	 * @see yyerror
+	 */
 	int yyerrs = 0;
 
-	/* bison functions */
 	int yylex(void);
 	int yyparse(void);
 	void yylocate(Node*, const YYLTYPE&);
@@ -125,7 +132,7 @@
 %token <id> GREATER_EQUAL ">=" // -ext
 %token <id> ASSIGN "<-"
 
-%token START_LEXER START_PARSER START_EXTENDED;
+%token START_LEXER START_PARSER START_EXT_LEXER START_EXT_PARSER;
 %start start;
 
 %nterm <id> type class-parent type_id object_id
@@ -154,13 +161,16 @@
 
 %%
 
-start:			START_LEXER token
+start:			START_LEXER token // -lex
 				| START_PARSER program
-				| START_EXTENDED extended;
+				| START_EXT_LEXER token // -lex -ext
+				| START_EXT_PARSER extended;
 
 token:			/* */
 				| token INTEGER_LITERAL
 				{ yyprint("integer-literal," + Integer($2).toString()); }
+				| token REAL_LITERAL
+				{ yyprint("real-literal," + Real($2).toString()); }
 				| token STRING_LITERAL
 				{ yyprint("string-literal," + String($2).toString());  }
 				| token TYPE_IDENTIFIER
@@ -174,14 +184,15 @@ object:			OBJECT_IDENTIFIER | "self";
 
 keyword:		"and" | "bool" | "break" | "class" | "do" | "double" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "then" | "to" | "true" | "unit" | "while" | "vararg" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
 
-program:		class
-				{ yyclasses.add($1); }
-				| class program
-				{ yyclasses.add($1); }
+program:		program-aux
+				| program-aux program
 				| error
 				{ yyerrok; }
 				| error program
 				{ yyerrok; };
+
+program-aux:	class
+				{ yyclasses.push($1); };
 
 extended:		extended-aux
 				| extended-aux extended
@@ -191,12 +202,12 @@ extended:		extended-aux
 				{ yyerrok; };
 
 extended-aux:	class
-				{ yyclasses.add($1); }
+				{ yyclasses.push($1); }
 				| method
-				{ yyfunctions.add($1); };
+				{ yyfunctions.push($1); };
 
 class:			"class" type_id class-parent "{" class-aux
-				{ $$ = new Class($2, $3, $5->fields, $5->methods); yylocate($$, @$); delete $5; };
+				{ $$ = new Class($2, $3, $5->fields.reverse(), $5->methods.reverse()); yylocate($$, @$); delete $5; };
 
 class-parent:	/* */
 				{ $$ = strdup("Object"); }
@@ -204,19 +215,19 @@ class-parent:	/* */
 				{ $$ = $2; };
 
 class-aux:		"}"
-				{ $$ = new Class::Definition(); }
+				{ $$ = new ClassDefinition(); }
 				| field ";" class-aux
-				{ $3->fields.add($1); $$ = $3;	}
+				{ $3->fields.push($1); $$ = $3;	}
 				| method class-aux
-				{ $2->methods.add($1); $$ = $2;	}
+				{ $2->methods.push($1); $$ = $2;	}
 				| error "}"
-				{ $$ = new Class::Definition(); yyerrok; }
+				{ $$ = new ClassDefinition(); yyerrok; }
 				| error ";" class-aux
 				{ $$ = $3; yyerrok; }
 				| error block class-aux /* prevent unmatched { */
 				{ $$ = $3; yyerrok; }
 				| error END
-				{ $$ = new Class::Definition();
+				{ $$ = new ClassDefinition();
 					yyrelocate(@$);
 					yyerror("syntax error, unexpected end-of-file, missing ending } of class declaration");
 				};
@@ -229,19 +240,19 @@ fields:			"(" ")"
 				| "(" fields-aux
 				{ $$ = $2; };
 fields-aux:		field ")"
-				{ $$ = new List<Field>(); $$->add($1); }
+				{ $$ = new List<Field>(); $$->push($1); }
 				| field "," fields-aux
-				{ $3->add($1); $$ = $3; }
+				{ $3->push($1); $$ = $3; }
 				| error ")"
 				{ $$ = new List<Field>(); yyerrok; }
 				| error "," fields-aux
 				{ $$ = $3; yyerrok; };
 
 prototype:		object_id formals ":" type
-				{ $$ = new Method($1, *$2, $4, NULL); yylocate($$, @$); delete $2; };
+				{ $$ = new Method($1, $2->reverse(), $4, NULL); yylocate($$, @$); delete $2; };
 
 method:			prototype block
-				{ $1->block = std::make_shared<Block>(*$2); $$ = $1; yylocate($$->block.get(), @2); delete $2; }
+				{ $1->block = std::make_shared<Block>($2->reverse()); $$ = $1; yylocate($$->block.get(), @2); delete $2; }
 				| "extern" prototype ";"
 				{ $$ = $2; }
 				| "extern" "vararg" prototype ";"
@@ -255,9 +266,9 @@ formals:		"(" ")"
 				| "(" formals-aux
 				{ $$ = $2; };
 formals-aux:	formal ")"
-				{ $$ = new List<Formal>(); $$->add($1); }
+				{ $$ = new List<Formal>(); $$->push($1); }
 				| formal "," formals-aux
-				{ $3->add($1); $$ = $3; }
+				{ $3->push($1); $$ = $3; }
 				| error ")"
 				{ $$ = new List<Formal>(); yyerrok; }
 				| error "," formals-aux
@@ -292,9 +303,9 @@ block:			"{" block-aux
 					yyerror("syntax error, empty block");
 				};
 block-aux:		expr "}"
-				{ $$ = new List<Expr>(); $$->add($1); }
+				{ $$ = new List<Expr>(); $$->push($1); }
 				| expr ";" block-aux
-				{ $3->add($1); $$ = $3; }
+				{ $3->push($1); $$ = $3; }
 				| error "}"
 				{ $$ = new List<Expr>(); yyerrok; }
 				| error ";" block-aux
@@ -331,7 +342,7 @@ expr-aux:		if
 				| "(" expr ")"
 				{ $$ = $2; }
 				| block
-				{ $$ = new Block(*$1); delete $1; }
+				{ $$ = new Block($1->reverse()); delete $1; }
 				| "self"
 				{ $$ = new Self(); };
 
@@ -350,7 +361,7 @@ let:			"let" object_id ":" type init "in" expr
 				{ $$ = new Let($2, $4, $5, $7); };
 
 lets:			"lets" fields "in" expr
-				{ $$ = new Lets(*$2, $4); };
+				{ $$ = new Lets($2->reverse(), $4); };
 
 init:			/* */
 				{ $$ = NULL; }
@@ -403,18 +414,18 @@ literal:		INTEGER_LITERAL
 				{ $$ = new Boolean(false); };
 
 call:			expr "." object_id args
-				{ $$ = new Call($1, $3, *$4); delete $4; }
+				{ $$ = new Call($1, $3, $4->reverse()); delete $4; }
 				| object_id args
-				{ $$ = new Call(yyext ? (Expr*) new Unit() : (Expr*) new Self(), $1, *$2); delete $2; };
+				{ $$ = new Call(yyext ? (Expr*) new Unit() : (Expr*) new Self(), $1, $2->reverse()); delete $2; };
 
 args:			"(" ")"
 				{ $$ = new List<Expr>(); }
 				| "(" args-aux
 				{ $$ = $2; };
 args-aux:		expr ")"
-				{ $$ = new List<Expr>(); $$->add($1); }
+				{ $$ = new List<Expr>(); $$->push($1); }
 				| expr "," args-aux
-				{ $3->add($1); $$ = $3; }
+				{ $3->push($1); $$ = $3; }
 				| error ")"
 				{ $$ = new List<Expr>(); yyerrok; }
 				| error "," args-aux
@@ -427,9 +438,20 @@ args-aux:		expr ")"
 
 %%
 
+/// Set the position of a node
 void yylocate(Node* n, const YYLTYPE& loc) {
-	n->line = loc.first_line;
-	n->column = loc.first_column;
+	n->pos.line = loc.first_line;
+	n->pos.column = loc.first_column;
+}
+
+/**
+ * Modify the current file location
+ *
+ * @remark Only the first cursor of the location window is modified, so that subsequent locations are not affected.
+ */
+void yyrelocate(const YYLTYPE& loc) {
+	yylloc.first_line = loc.first_line;
+	yylloc.first_column = loc.first_column;
 }
 
 void yyrelocate(int line, int column) {
@@ -437,29 +459,36 @@ void yyrelocate(int line, int column) {
 	yylloc.first_column = column;
 }
 
-void yyrelocate(const YYLTYPE& loc) {
-	yylloc.first_line = loc.first_line;
-	yylloc.first_column = loc.first_column;
-}
-
+/**
+ * Print message on standard output along with the current location
+ *
+ *     <line>,<column>,msg
+ */
 void yyprint(const std::string& msg) {
 	std::cout << yylloc.first_line << ',' << yylloc.first_column << ',';
 	std::cout << msg << std::endl;
 }
 
+/**
+ * Print error message in standard error along with current location
+ *
+ *     <filename>:<line>:<column>: msg
+ */
 void yyerror(const std::string& msg) {
 	std::cerr << yylloc.filename << ':' << yylloc.first_line << ':' << yylloc.first_column << ':';
 	std::cerr << ' ' << msg << std::endl;
 	++yyerrs;
 }
 
+/// Open file
 bool yyopen(const char* filename) {
 	yylloc.filename = strdup(filename);
 	yyin = fopen(yylloc.filename, "r");
 
-	return yyin ? true : false;
+	return yyin;
 }
 
+/// Close file
 void yyclose() {
 	fclose(yyin);
 }

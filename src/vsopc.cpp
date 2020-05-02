@@ -1,12 +1,5 @@
 #include "vsop.tab.h"
 
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/InstCombine/InstCombine.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Scalar/GVN.h"
-
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -15,27 +8,10 @@
 
 using namespace std;
 
-/* global variables */
-int yymode = START_PARSER;
+/* bison */
 
-List<Class> yyclasses;
-List<Method> yyfunctions;
-
-/* static variables */
-
-static Program* program;
-
-static llvm::LLVMContext context;
-static llvm::IRBuilder<> builder(context);
-static llvm::Module module("VSOP", context);
-
-static string rso_string;
-static llvm::raw_string_ostream rso(rso_string);
-
-/* bison global variables */
 extern int yyerrs;
 
-/* bison global functions */
 extern int yyparse(void);
 extern void yyrelocate(int, int);
 extern void yyprint(const string&);
@@ -43,10 +19,22 @@ extern void yyerror(const string&);
 extern bool yyopen(const char*);
 extern void yyclose();
 
-/* functions */
+/* vsopc */
+
+int yymode = START_PARSER;
+
+List<Class> yyclasses;
+List<Method> yyfunctions;
+
+Program* program;
+LLVMHelper helper("VSOP");
 
 void lexer() {
-	yymode = START_LEXER;
+	if (yymode == START_EXT_PARSER)
+		yymode = START_EXT_LEXER;
+	else
+		yymode = START_LEXER;
+
 	yyparse();
 }
 
@@ -57,46 +45,12 @@ void parser() {
 }
 
 void checker() {
-	LLVMHelper helper = {
-		context,
-		builder,
-		module
-	};
+	program->declaration(helper);
+	program->codegen(*program, helper);
 
-	Scope scope;
-	vector<Error> errors;
-
-	program->declaration(helper, errors);
-	program->codegen(program, helper, scope, errors);
-
-	for (Error& e: errors) {
-		yyrelocate(e.line, e.column);
+	for (Error& e: helper.errors) {
+		yyrelocate(e.pos.line, e.pos.column);
 		yyerror("semantic error, " + e.msg);
-	}
-}
-
-void llvmer() {
-	// Create function pass manager
-	llvm::legacy::FunctionPassManager optimizer(&module);
-
-	optimizer.add(llvm::createInstructionCombiningPass()); // peephole and bit-twiddling optimizations
-	optimizer.add(llvm::createReassociatePass()); // reassociate expressions
-	optimizer.add(llvm::createGVNPass()); // eliminate common sub-expressions
-	optimizer.add(llvm::createCFGSimplificationPass()); // simplify the control flow graph (deleting unreachable blocks, etc)
-
-	optimizer.doInitialization();
-
-	// Pass over each functions
-	for (auto it = module.begin(); it != module.end(); ++it) {
-		// Validate the generated code
-		if (llvm::verifyFunction(*it, &rso)) {
-			rso << '\n';
-			++yyerrs;
-			continue;
-		}
-
-		// Run the optimizer
-		optimizer.run(*it);
 	}
 }
 
@@ -130,11 +84,11 @@ int main (int argc, char* argv[]) {
 
 	for (int i = 1; i < argc; ++i)
 		switch (hashflag(argv[i])) {
-			case llvmir: llvmflag = true;
+			case llvmir: llvmflag = true; // falltrought
 			case check: checkflag = true;
 			case parse: parseflag = true;
 			case lex: lexflag = true; execflag = false; break;
-			case ext: yymode = START_EXTENDED; break;
+			case ext: yymode = START_EXT_PARSER; break;
 			case nopt: optflag = false; break;
 			default: filename = argv[i];
 		}
@@ -150,38 +104,38 @@ int main (int argc, char* argv[]) {
 		return 1;
 	}
 
-	module.setSourceFileName(filename);
+	helper.module->setSourceFileName(filename);
 
-	if (lexflag) {
-		if (parseflag) {
+	if (lexflag) { // if -lex or higher
+		if (parseflag) { // if -parse or higher
 			parser();
 
-			if (checkflag) {
+			if (checkflag) { // if -check or higher
 				checker();
 
-				if (yyerrs == 0 and llvmflag) {
+				if (llvmflag) { // if -llvm or higher
 					if (optflag)
-						llvmer();
+						yyerrs += helper.passes();
 
-					rso << module;
+					if (yyerrs == 0) { // no errors
+						if (execflag and system(NULL)) {
+							// Get basename
+							string basename = filename.substr(0, filename.find_last_of('.'));
+							string object = "resources/runtime/object";
 
-					if (yyerrs == 0 and execflag and system(NULL)) {
-						// Get basename
-						string basename = filename.substr(0, filename.find_last_of('.'));
-						string object = "resources/runtime/object";
+							// Dump LLVM IR code
+							ofstream out(basename + ".ll");
+							out << helper.dump();
+							out.close();
 
-						// Dump LLVM IR code
-						ofstream out(basename + ".ll");
-						out << rso.str();
-						out.close();
+							// Compile basename.ll to assembly
+							sys("llc-9 " + basename + ".ll -O2");
 
-						// Compile basename.ll to assembly
-						sys("llc-9 " + basename + ".ll -O2");
-
-						// Bind with object.s and create executable
-						sys("clang " + basename + ".s /usr/local/lib/vsopc/object.s -lm -o " + basename);
-					} else
-						cout << rso.str() << endl;
+							// Bind with object.s and create executable
+							sys("clang " + basename + ".s /usr/local/lib/vsopc/object.s -lm -o " + basename);
+						} else
+							cout << helper.dump();
+					}
 				} else
 					cout << program->toString(true) << endl;
 			} else
