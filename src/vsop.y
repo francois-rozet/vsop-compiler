@@ -102,6 +102,7 @@
 %token <id> TRUE "true"
 %token <id> UNIT "unit"
 %token <id> WHILE "while"
+%token <id> VARARG "vararg"
 
 %token <id> LBRACE "{"
 %token <id> RBRACE "}"
@@ -171,7 +172,7 @@ token:			/* */
 
 object:			OBJECT_IDENTIFIER | "self";
 
-keyword:		"and" | "bool" | "break" | "class" | "do" | "double" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "then" | "to" | "true" | "unit" | "while" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
+keyword:		"and" | "bool" | "break" | "class" | "do" | "double" | "else" | "extends" | "extern" | "false" | "for" | "if" | "in" | "int32" | "isnull" | "let" | "lets" | "new" | "not" | "mod" | "or" | "string" | "then" | "to" | "true" | "unit" | "while" | "vararg" | "{" | "}" | "(" | ")" | ":" | ";" | "," | "+" | "-" | "*" | "/" | "^" | "." | "=" | "!=" | "<" | "<=" | ">" | ">=" | "<-";
 
 program:		class
 				{ yyclasses.add($1); }
@@ -242,7 +243,9 @@ prototype:		object_id formals ":" type
 method:			prototype block
 				{ $1->block = std::make_shared<Block>(*$2); $$ = $1; yylocate($$->block.get(), @2); delete $2; }
 				| "extern" prototype ";"
-				{ $$ = $2; };
+				{ $$ = $2; }
+				| "extern" "vararg" prototype ";"
+				{ $$ = $3; $$->variadic = true; };
 
 formal:			object_id ":" type // possible improvement -> merge field and formal
 				{ $$ = new Formal($1, $3); yylocate($$, @$); };

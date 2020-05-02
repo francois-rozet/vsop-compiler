@@ -176,20 +176,21 @@ class Class; // forward declaration
 class Method: public Node {
 	public:
 		/* Constructors */
-		Method(const std::string& name, const List<Formal>& formals, const std::string& type, Block* block):
-			name(name), formals(formals), type(type), block(block) {}
-		Method(const std::string& name, const List<Formal>& formals, const std::string& type, std::shared_ptr<Block> block):
-			name(name), formals(formals), type(type), block(block) {}
+		Method(const std::string& name, const List<Formal>& formals, const std::string& type, Block* block, bool variadic=false):
+			name(name), formals(formals), type(type), block(block), variadic(variadic) {}
+		Method(const std::string& name, const List<Formal>& formals, const std::string& type, std::shared_ptr<Block> block, bool variadic=false):
+			name(name), formals(formals), type(type), block(block), variadic(variadic) {}
 
 		/* Fields */
 		std::string name, type;
+		bool variadic;
 
 		List<Formal> formals;
 		std::unordered_map<std::string, std::shared_ptr<Formal>> formals_table;
 
 		std::shared_ptr<Block> block;
 
-		Class* parent;
+		Class* parent = nullptr;
 
 		unsigned idx;
 
@@ -223,7 +224,7 @@ class Class: public Node {
 		List<Method> methods;
 		std::unordered_map<std::string, std::shared_ptr<Method>> methods_table;
 
-		Class* parent;
+		Class* parent = nullptr;
 
 		/* Methods */
 		virtual std::string toString(bool with_t=false) const;

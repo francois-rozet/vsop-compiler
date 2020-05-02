@@ -179,7 +179,7 @@ int main (int argc, char* argv[]) {
 						sys("llc-9 " + basename + ".ll -O2");
 
 						// Bind with object.s and create executable
-						sys("clang " + basename + ".s /usr/local/lib/vsopc/object.s -o " + basename);
+						sys("clang " + basename + ".s /usr/local/lib/vsopc/object.s -lm -o " + basename);
 					} else
 						cout << rso.str() << endl;
 				} else

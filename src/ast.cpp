@@ -324,7 +324,10 @@ llvm::Type* Formal::getType(LLVMHelper& h) const {
 
 /* Methods */
 string Method::toString(bool with_t) const {
-	string str = "Method(" + name + "," + formals.toString(with_t) + "," + type;
+	string str = "Method(" + name + "," + formals.toString(with_t);
+	if (variadic)
+		str += "...";
+	str += "," + type;
 	if (block)
 		str += "," + block->toString(with_t);
 	return str + ")";
@@ -398,7 +401,7 @@ void Method::declaration(LLVMHelper& h, vector<Error>& errors) {
 			params_t.push_back(formal->getType(h));
 
 		// Prototype
-		llvm::FunctionType* ft = llvm::FunctionType::get(return_t, params_t, false);
+		llvm::FunctionType* ft = llvm::FunctionType::get(return_t, params_t, variadic);
 
 		// Forward declaration
 		llvm::Function* f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, this->getName(), h.module);
@@ -1375,12 +1378,15 @@ llvm::Value* Call::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error
 
 		if (f) {
 			int align = params.empty() ? 0 : 1;
+			int nump = ft->getNumParams();
 
 			// Compare call with signature
-			if (args.size() + align == ft->getNumParams()) {
+			if (args.size() + align >= nump) {
+				bool valid = true;
+
 				for (int i = 0; i < args.size(); ++i) {
-					llvm::Type* param_t = ft->getParamType(i + align);
 					llvm::Type* arg_t = args[i]->val ? args[i]->val->getType() : nullptr;
+					llvm::Type* param_t = i + align < nump ? ft->getParamType(i + align) : arg_t;
 
 					if (isEqualTo(arg_t, param_t))
 						params.push_back(args[i]->val);
@@ -1393,14 +1399,20 @@ llvm::Value* Call::codegen_aux(Program* p, LLVMHelper& h, Scope& s, vector<Error
 								param_t
 							)
 						);
-					else
+					else {
 						errors.push_back({args[i]->line, args[i]->column, "expected type '" + asString(param_t) + "', but got argument of type '" + asString(arg_t) + "'"});
+						valid = false;
+					}
 				}
 
-				if (params.size() == ft->getNumParams()) // all arguments have the good type
-					return h.builder.CreateCall(f, params);
+				if (valid) { // all arguments have the expected type
+					if (params.size() == nump or (ft->isVarArg() and params.size() > nump))
+						return h.builder.CreateCall(f, params);
+					else
+						errors.push_back({this->line, this->column, "call to method " + name + " with too many arguments"});
+				}
 			} else
-				errors.push_back({this->line, this->column, "call to method " + name + " with wrong number of arguments"});
+				errors.push_back({this->line, this->column, "call to method " + name + " with too few arguments"});
 		} else
 			errors.push_back({this->line, this->column, "call to undeclared method " + name});
 	} else

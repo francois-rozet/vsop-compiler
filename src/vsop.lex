@@ -77,7 +77,8 @@
 		{"lets", LETS},
 		{"mod", MOD},
 		{"or", OR},
-		{"to", TO}
+		{"to", TO},
+		{"vararg", VARARG}
 	};
 
 	/* operators */
