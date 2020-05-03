@@ -468,6 +468,8 @@ class Identifier: public Expr {
 class Self: public Identifier {
 	public:
 		Self(): Identifier("self") {}
+
+		virtual llvm::Value* _codegen(Program&, LLVMHelper&);
 };
 
 class Integer: public Expr {

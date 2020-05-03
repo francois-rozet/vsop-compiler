@@ -170,7 +170,12 @@ class LLVMHelper {
 			return scope.find(name) != scope.end();
 		}
 
-		/// Allocate named memory on the stack
+		/**
+		 * Allocate named memory on the stack
+		 *
+		 * @note It is not possible to allocate/store a 'void' ('unit') type per-say. Instead a nullptr is inserted.
+		 * @see push
+		 */
 		llvm::Value* alloc(const std::string& name, llvm::Type* type) {
 			return this->push(
 				name,
@@ -181,7 +186,9 @@ class LLVMHelper {
 		/**
 		 * Store a value in named memory space
 		 *
+		 * @note If the value is of type 'void' ('unit') nothing is stored.
 		 * @warning should be preceeded by alloc
+		 * @see alloc
 		 */
 		llvm::Value* store(const std::string& name, llvm::Value* value) const {
 			if (llvm::Value* ptr = this->getValue(name))
@@ -193,6 +200,7 @@ class LLVMHelper {
 		 * Load a value from named memory space
 		 *
 		 * @warning should be preceeded by store
+		 * @see store
 		 */
 		llvm::Value* load(const std::string& name) const {
 			if (llvm::Value* ptr = this->getValue(name))

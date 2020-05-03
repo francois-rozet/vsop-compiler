@@ -127,17 +127,32 @@ void Method::codegen(Program& p, LLVMHelper& h) {
 	h.builder->SetInsertPoint(entry_block);
 
 	// Add arguments to scope
-	for (auto& it: f->args()) {
-		h.alloc(it.getName(), it.getType());
-		h.store(it.getName(), &it);
+	auto it = f->arg_begin();
+
+	/* There is no need to allocate and store 'self' because, since
+	   no one can assign to 'self', it is always in SSA form. */
+	if (parent) {
+		h.push("self", it);
+		++it;
 	}
+
+	for (shared_ptr<Formal>& formal: formals)
+		if (not isUnit(formal->getType(h))) {
+			h.alloc(it->getName(), it->getType());
+			h.store(it->getName(), it);
+			++it;
+		} else
+			h.push(formal->name, nullptr);
 
 	// Method block
 	block->codegen(p, h);
 
 	// Remove arguments from scope
-	for (auto& it: f->args())
-		h.pop(it.getName());
+	if (parent)
+		h.pop("self");
+
+	for (shared_ptr<Formal>& formal: formals)
+		h.pop(formal->name);
 
 	// Result casting
 	llvm::Type* return_t = f->getReturnType();
@@ -183,7 +198,8 @@ void Method::declaration(LLVMHelper& h) {
 			params_t.push_back((llvm::Type*) parent->getType(h)->getPointerTo());
 
 		for (shared_ptr<Formal>& formal: formals)
-			params_t.push_back(formal->getType(h));
+			if (not isUnit(formal->getType(h)))
+				params_t.push_back(formal->getType(h));
 
 		// Prototype
 		llvm::FunctionType* ft = llvm::FunctionType::get(return_t, params_t, variadic);
@@ -191,14 +207,19 @@ void Method::declaration(LLVMHelper& h) {
 		// Forward declaration
 		llvm::Function* f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, this->getName(), *h.module);
 
-		// First argument as 'self'
-		if (parent)
-			f->arg_begin()->setName("self");
-
 		// Set arguments names
-		int i = 0;
-		for (auto it = f->arg_begin() + (parent ? 1 : 0); it != f->arg_end(); ++it)
-			it->setName(formals[i++]->name);
+		auto it = f->arg_begin();
+
+		if (parent) {
+			it->setName("self");
+			++it;
+		}
+
+		for (shared_ptr<Formal>& formal: formals)
+			if (not isUnit(formal->getType(h))) {
+				it->setName(formal->name);
+				++it;
+			}
 	} else
 		h.errors.push_back({this->pos, "unknown return type '" + type + "' of method " + this->getName(true)});
 }
@@ -807,8 +828,8 @@ llvm::Value* Assign::_codegen(Program& p, LLVMHelper& h) {
 	value->codegen(p, h);
 
 	// Search self's fields
-	llvm::Type* self_t = h.getType("self");
-	shared_ptr<Class> c = self_t ? p.classes_table[asString(self_t)] : nullptr;
+	llvm::Value* self = Self()._codegen(p, h);
+	shared_ptr<Class> c = self ? p.classes_table[asString(self->getType())] : nullptr;
 
 	// Get target type
 	llvm::Type* target_t = nullptr;
@@ -842,7 +863,7 @@ llvm::Value* Assign::_codegen(Program& p, LLVMHelper& h) {
 		h.builder->CreateStore(
 			casted,
 			h.builder->CreateStructGEP(
-				h.load("self"),
+				self,
 				c->fields_table[name]->idx
 			)
 		);
@@ -1084,29 +1105,28 @@ llvm::Value* Call::_codegen(Program& p, LLVMHelper& h) {
 	args.codegen(p, h);
 
 	if (isUnit(scope_t) or isClass(scope_t)) {
+		shared_ptr<Method> m;
 		llvm::Function* f = nullptr;
-		llvm::FunctionType* ft = nullptr;
 		vector<llvm::Value*> params;
 
 		if (isUnit(scope_t) and p.functions_table.find(name) != p.functions_table.end()) { // top-level function
-			f = p.functions_table[name]->getFunction(h);
-			ft = f->getFunctionType();
-		} else if (not isUnit(scope_t) or h.contains("self")) {
-			llvm::Value* obj = isUnit(scope_t) ? h.load("self") : scope->getValue();
+			m = p.functions_table[name];
+			f = m->getFunction(h);
+		} else if (isClass(scope_t) or h.contains("self")) {
+			llvm::Value* obj = isUnit(scope_t) ? Self()._codegen(p, h) : scope->getValue();
 
 			shared_ptr<Class> c = p.classes_table[asString(obj->getType())];
-
 			if (c->methods_table.find(name) != c->methods_table.end()) { // class method
+				m = c->methods_table[name];
+
 				f = (llvm::Function*) h.builder->CreateLoad(
 					h.builder->CreateStructGEP(
 						h.builder->CreateLoad(
 							h.builder->CreateStructGEP(obj, 0)
 						), // obj->vtable
-						c->methods_table[name]->idx
-					)
+						m->idx
+					) // vtable->method
 				); // vtable->method
-
-				ft = (llvm::FunctionType*) f->getType()->getPointerElementType();
 
 				// Add obj as self param
 				params.push_back(obj);
@@ -1114,42 +1134,33 @@ llvm::Value* Call::_codegen(Program& p, LLVMHelper& h) {
 		}
 
 		if (f) {
-			int align = params.empty() ? 0 : 1;
-			int nump = ft->getNumParams();
+			int align = m->parent ? 0 : 1;
+			int n = m->formals.size();
 
 			// Compare call with signature
-			if (args.size() + align >= nump) {
+			if (args.size() + align == n or (m->variadic and args.size() + align > n)) {
 				bool valid = true;
 
 				for (int i = 0; i < args.size(); ++i) {
-					llvm::Type* arg_t = args[i]->getType();
-					llvm::Type* param_t = i + align < nump ? ft->getParamType(i + align) : arg_t;
+					llvm::Type* param_t = (i + align < n) ? m->formals[i + align]->getType(h) : args[i]->getType();
 
-					if (isSameAs(arg_t, param_t))
-						params.push_back(args[i]->getValue());
-					else if (isNumeric(arg_t) and isNumeric(param_t))
-						params.push_back(h.numericCast(args[i]->getValue(), param_t));
-					else if (p.isSubclassOf(asString(arg_t), asString(param_t)))
-						params.push_back(
-							h.builder->CreatePointerCast(
-								args[i]->getValue(),
-								param_t
-							)
-						);
+					if (isUnit(args[i]->getType()) and isUnit(param_t));
 					else {
-						h.errors.push_back({args[i]->pos, "expected type '" + asString(param_t) + "', but got argument of type '" + asString(arg_t) + "'"});
-						valid = false;
+						llvm::Value* casted = castToTargetTy(p, h, args[i]->getValue(), param_t);
+
+						if (casted)
+							params.push_back(casted);
+						else {
+							h.errors.push_back({args[i]->pos, "expected type '" + asString(param_t) + "', but got return value of type '" + asString(args[i]->getType()) + "'"});
+							valid = false;
+						}
 					}
 				}
 
-				if (valid) { // all arguments have the expected type
-					if (params.size() == nump or (ft->isVarArg() and params.size() > nump))
-						return h.builder->CreateCall(f, params);
-					else
-						h.errors.push_back({this->pos, "call to method " + name + " with too many arguments"});
-				}
+				if (valid) // all arguments have the expected type
+					return h.builder->CreateCall(f, params);
 			} else
-				h.errors.push_back({this->pos, "call to method " + name + " with too few arguments"});
+				h.errors.push_back({this->pos, "call to method " + m->getName() + " with wrong number of arguments"});
 		} else
 			h.errors.push_back({this->pos, "call to undeclared method " + name});
 	} else
@@ -1188,20 +1199,36 @@ llvm::Value* Identifier::_codegen(Program& p, LLVMHelper& h) {
 		return h.load(id);
 
 	// Search self's fields
-	llvm::Type* self_t = h.getType("self");
-	shared_ptr<Class> c = self_t ? p.classes_table[asString(self_t)] : nullptr;
+	llvm::Value* self = Self()._codegen(p, h);
+	shared_ptr<Class> c = self ? p.classes_table[asString(self->getType())] : nullptr;
 
-	if (c and c->fields_table.find(id) != c->fields_table.end())
-		return h.builder->CreateLoad(
-			h.builder->CreateStructGEP(
-				h.load("self"),
-				c->fields_table[id]->idx
-			)
-		); // self->id
+	if (c and c->fields_table.find(id) != c->fields_table.end()) {
+		if (not isUnit(c->fields_table[id]->getType()))
+			return h.builder->CreateLoad(
+				h.builder->CreateStructGEP(
+					self,
+					c->fields_table[id]->idx
+				)
+			); // self->id
+		else
+			return nullptr;
+	}
 
 	h.errors.push_back({this->pos, "undeclared identifier " + id});
 
 	return nullptr;
+}
+
+/***** Self *****/
+
+/**
+ * Optain the pointer to 'self'.
+ *
+ * @remark One cannot load 'self' from stack memory as it is never stored.
+ * @see Method::_codegen
+ */
+llvm::Value* Self::_codegen(Program& p, LLVMHelper& h) {
+	return h.getValue("self");
 }
 
 /***** Integer *****/
