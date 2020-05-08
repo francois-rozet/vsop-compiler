@@ -1,0 +1,303 @@
+\documentclass[a4paper, 12pt]{article}
+
+%%%%%%%%%%%%%%%%%%% Packages
+
+\usepackage[english]{babel}
+\usepackage{packages/sleek}
+\usepackage{packages/sleek-listings}
+\usepackage{packages/sleek-theorems}
+
+%%%%%%%%%%%%%%%%%%% Titlepage
+
+\title{Implementing a VSOP Compiler}
+\author{François \textsc{Rozet}}
+\date{\today}
+
+%%%%%%%%%%%%%%%%%%%
+
+\lstdefinestyle{vsop}{
+	style=default,
+	basicstyle=\normalsize\ttfamily,
+	numberstyle=\normalsize\ttfamily,
+	%%%%%
+	commentstyle=\color[HTML]{A020F0},
+	keywordstyle=\color[HTML]{228B22},
+	stringstyle=\color[HTML]{BA2121},
+	emphstyle=\color[HTML]{A020F0},
+	%%%%%
+	morestring=[s]{\"}{\"},
+	morekeywords={program, class, extends, type, object, identifier, real, integer, literal, digit, block, aux, expr, for, while, if, break, let, lets, field, method, formals, prototype, extern, vararg},
+	%%%%%
+	emph={bool, int32, string, unit, double, void}
+}
+
+\lstdefinestyle{adhoc}{
+	style=cpp,
+	basicstyle=\normalsize\ttfamily,
+	numberstyle=\normalsize\ttfamily,
+	%%%%%
+	commentstyle=\color[HTML]{A020F0},
+	keywordstyle=\color[HTML]{A020F0},
+	stringstyle=\color[HTML]{BA2121},
+	emphstyle=\color[HTML]{228B22},
+	%%%%%
+	morestring=[s]{\'}{\'},
+	%%%%%
+	otherkeywords={+, ++, |, -},
+	emph={equality, range}
+}
+
+%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+	\maketitle
+	
+	\section{Modules}
+	
+	The implemented compiler is composed of three main components : a lexer that uses the \texttt{Flex} framework for scanning tokens, a parser built with \texttt{Bison} that produces an \emph{abstract syntax tree} and, finally, the AST itself, that performs type-checking and code generation at the same time using the \texttt{LLVM C++} API.
+	
+	All the binding and auxiliary code is written in standard \texttt{C++14}.
+	
+	\subsection{Lexer - \texttt{vsop.lex}}
+	
+	The implemented regular expressions are strongly inspired from the VSOP manual, with some exceptions.
+	
+	For instance, string literals are not matched with a single regular expression but with a \emph{sub-scanner}. This scanner is entered when opening double-quotes (\texttt{\textbackslash"}) are encountered and isn't left until closing double-quotes are read. This allows, for example, to store spaces, tabulations, etc. while they are ignored in the main scanner.
+	
+	Multi-line comments are treated similarly, with the addition of a \emph{stack} to remember the locations of unmatched \texttt{(*}.
+	
+	Also, to reduce the number of rules, keywords were not added in the regular expression set. Instead, they are matched with the same expression as object identifiers. Then, when a string is matched, it is checked whether it is a keyword or not using a \emph{keyword table}.
+	
+	\subsubsection{Adhoc regular expression matching -- \texttt{adhoc/}}
+	
+	Actually, the \texttt{Flex} lexer wasn't the first lexer implemented. As a first attempt, a small \emph{regular expression} \texttt{C++} library was implemented.
+	
+	The main goal was to leverage the \emph{operator overloading} capability of \texttt{C++} to be able to write directly EBNF-like regular expressions.
+	
+	Eventually, it was possible to write rules such as
+	
+	\begin{lstlisting}[style=adhoc]
+	underscore = equality("_");
+	lowercase_letter = range("a", "z");
+    uppercase_letter = range("A", "Z");
+    digit = range("0", "9");
+    letter = lowercase_letter | uppercase_letter;
+    object_identifier = lowercase_letter + (letter | digit | underscore)++;
+	\end{lstlisting}
+	
+	directly in \texttt{C++}.
+	
+	Even thought it worked quite well, this method was abandoned in favor of \texttt{Flex} mostly because of its integration with \texttt{Bison}.
+	
+	Also, one should mention that the efficiency of the method was probably terrible as parallel matching expressions (\lstinline[style=adhoc]{|}) were never \enquote{merged} together, thus producing an \emph{non-deterministic automaton}.
+	
+	\begin{note}
+	The sources files are located in the \texttt{adhoc/} sub-folder. The \texttt{vsopc} executable produced by the \texttt{Makefile} only supports \texttt{-lex}.
+	\end{note}
+	
+	\subsection{Parser - \texttt{vsop.y}}
+	
+	\texttt{Bison} generates, by default, a \emph{bottom-up} LALR\footnote{Look-Ahead Left-to-right Rightmost derivation} parser. This is especially appropriate for building an AST as it is easier to do it \emph{leaf-to-root} than the inverse.
+	
+	For project 2, the required representation fitted quite well with the idea of a per-node context-free function that would return its own representation, while recursively asking for the representation of its children, if any.
+	
+	Therefore, the choice was made to implement this function as a virtual \emph{class member} method named \texttt{toString}, leveraging the inheritance capabilities of \texttt{C++}. However, for this to work, it is necessary that each node holds \emph{references} (pointers) to its children nodes instead of the actual objects. If not done carefully, this could very easily lead to memory leaks. Hopefully, \texttt{C++14} has \emph{smart pointers} that automatically manage their memory space
+	and will deallocate it when they go out of scope.
+	
+	\subsubsection{Error detection and recovery}
+	
+	By default, \texttt{Bison} stops at soon as it reaches an error. Although it would have met the requirements for the project, is is preferable to continue parsing to report more errors.
+	
+	Fortunately, \texttt{Bison} possesses a special token \texttt{error} that allows to introduce specific rules to recover from errors. Very roughly, \texttt{error} can force the situation to fit a rule, by discarding part of the semantic context, \emph{i.e.} part of the stack, and part of the input.
+	
+	The way it was used in this project is similar to \emph{panic-mode} recovery, \emph{i.e.} skipping until the next synchronizing token. For instance, for \texttt{block} expressions,
+	\vspace{0.5em}
+	
+	\begin{lstlisting}[style=vsop]
+    block     = "{" block-aux ;
+    block-aux = expr  "}" | expr  ";" block-aux
+              | error "}" | error ";" block-aux
+              | error block block-aux ;
+	\end{lstlisting}
+	
+	As one can see, \texttt{error} is here used to recover from any wrongly formatted \lstinline[style=vsop]{expr}.
+	
+	However, the \texttt{error} token is also dangerous to use as it can skip any token. Especially, it can skip an opening delimiter such as \texttt{\{} and stop at its counterpart, leaving another \texttt{\}} dangling somewhere further. The last line of the above grammar prevent this.
+	
+    Another error detection mechanism that was implemented concerns typos. In VSPO, type identifiers must start with an uppercase letter while object identifiers must start with a lowercase letter. Therefore, for just one minor typo, the entire parsing process could be altered. To prevent this to happen, a rule has been added so that misplaced type identifiers can be \emph{converted} to object identifiers, if needed. The inverse was also implemented.
+    
+    For example,
+    \begin{lstlisting}[style=vsop]
+    class Table { NumberOfLegs : int32 <- 4; }
+    class Dog extends table {}
+	\end{lstlisting}
+	would produce the following error messages :
+	\begin{lstlisting}[style=vsop]
+    syntax error, unexpected type-identifier NumberOfLegs, replaced by myNumberOfLegs
+    syntax error, unexpected object-identifier table, replaced by Table
+	\end{lstlisting}
+	
+	\subsection{AST - \texttt{ast.hpp/cpp}}
+	
+	For type-checking and code generation, it was chosen to pursue with a simple object-oriented approach : each node would determine their own type and code, based on the set of available classes and methods.
+	
+	It was decided to decompose the process in two passes : a declaration pass and a code generation pass.
+	
+	\subsubsection{Declaration}
+	
+	The declaration pass is responsible for detecting and fixing
+	
+	\begin{enumerate}[noitemsep]
+	    \item cyclic class definitions;
+	    \item redefinitions of classes, methods, fields and formals;
+	    \item overwriting of fields;
+	    \item overwriting of methods with different different signatures;
+	    \item invalid (unknown) field types;
+	    \item invalid method signatures.
+	\end{enumerate}
+	
+	To detect inheritance cycles, a table of classes was built. Initially, this table only contains the \texttt{Object} class. Then, classes are processed iteratively. A class is added to the table only if a its parent is already in. If one or more classes are added to the table in a pass, a new pass is performed.
+	
+	The algorithm stops when none of the remaining classes have their parent in the table. Therefore, they either have an ill-formed (parent is unknown) or cyclic inheritance scheme. Redefinition and overwriting checks are also performed using table of methods, fields or formals.
+	
+	The other task of the declaration pass is to \emph{declare} the class structures, virtual tables and method prototypes. This was done primarily using the \texttt{LLVM C++} API. Most functions of this API\footnote{It was exceptionally painful to go trough the API \enquote{documentation} as it is barely documented. Yet, it was worth it as the whole program is represented in terms of API classes which are quite modular. Eventually, not a single line of \texttt{LLVM} assembly was written by hand during this project.} requires either a \emph{context}, a \emph{builder} or a \emph{module}. To ease the sharing of these three components, an \texttt{LLVMHelper} class was implemented (cf. \texttt{llvm.hpp}).
+	
+	\begin{note}
+	Even though the declaration pass is done recursively, the deepest it goes in the abstract syntax tree are formals. 
+	\end{note}
+	
+	\subsubsection{Code generation}
+	
+	The code generation pass is pretty straight forward, yet it was the longest to implement as each class of the AST required a different class method. The hardest part was probably to keep the \emph{scope}, \emph{i.e.} the set of known identifiers and their binding, consistent through the tree traversal.
+	
+	To do so, a \emph{named values manager} was added to the \texttt{LLVMHelper} class. It allows to seamlessly allocate, store and load from stack memory without worrying about erasing previously declared values. It basically is a table of stacks : each name is associated to a stack of values it was declared with, in the innermost declaration order. Eventually, declaring a new variable comes down to pushing a new entry at the top of the stack while losing the reference of a variable (like at the end of a method) comes down to popping the top entry.
+	
+	It should be mentionned that the type \lstinline[style=vsop]{unit} was interpreted like the type \lstinline[style=vsop]{void} in \texttt{C}, \emph{i.e.} the absence of value. Therefore, fields and formals with such type are not present in the declaration of respectively structures and methods. However, they are added to the named values manager (with no corresponding value) so that they can be referenced later on. This can be viewed as a single-step \emph{constant propagation}.
+	
+	\section{Extensions}
+	
+	In its current form, the VSOP language is not very convenient to program with. Therefore, several extensions have been implemented in order to make it a bit more enjoyable and useful to play with.
+	
+	It should be noted that switching to the extended mode (\texttt{-ext}) doesn't modify the AST at all. In fact, only the lexer and parser are modified, and not by much : a the beginning of the scanning process, the lexer reads a global variable named \texttt{yymode} that determines in what mode it should enter. There are four modes : \texttt{START\_LEXER}, \texttt{START\_EXT\_LEXER}, \texttt{START\_PARSER} and \texttt{START\_EXT\_PARSER}.
+	
+	For \texttt{EXT} modes, it will use an extended list of keywords and operators. It will also send the \texttt{yymode} as a the first token to the parser such that this one can modify its \emph{starting state}. For example, when it receives \texttt{START\_LEXER} (or \texttt{START\_EXT\_LEXER}) the parser will not build an AST. Instead, it will simply print the tokens (with the required convention) on standard output.
+	
+	\subsection{Floating point arithmetic}
+	
+	As suggested in the manual, having only integers (\lstinline[style=vsop]{int32}) as numeric type is quite limiting. Thus, along with the keyword \lstinline[style=vsop]{double}, floating point arithmetic operations (\lstinline[style=vsop]{"+", "-", "*",} etc.) have been added to the language.
+	
+	It was also decided that both numeric types (\lstinline[style=vsop]{int32} and \lstinline[style=vsop]{double}) would always \emph{agree}, meaning that one can be used where the other is required and inversely. This required the implementation of \emph{implicit} casting.
+	
+	Finally, for operations mixing \lstinline[style=vsop]{int32} and \lstinline[style=vsop]{double}, it was chosen to always cast to \lstinline[style=vsop]{double} as it is the most expressive ($\mathbb{Z} \subset \mathbb{R}$).
+	
+	A rule for parsing floating point literals was also added\footnote{In fact, this rule is \enquote{silenced} in the \texttt{vsop.lex} file to keep the lexer consistent with the statement when not in \texttt{-ext} mode.} to the lexer :
+	
+	\begin{lstlisting}[style=vsop]
+    real-literal = digit { digit } "." {digit}
+                 | { digit } "." digit { digit } ;
+	\end{lstlisting}
+	
+	\subsection{Control-flow}
+	
+	The \lstinline[style=vsop]{for} control-flow structure was added to VSOP as
+	\begin{lstlisting}[style=vsop]
+    for = "for" object-identifier "<-" expr "to" expr "do" expr ;
+	\end{lstlisting}
+	where the first and second \lstinline[style=vsop]{expr} are \lstinline[style=vsop]{int32} and are respectively the lower and upper bound (included) of the iterating range\footnote{The bounding values are computed only once, at the start of the loop and cannot be modified later.}.
+	
+	Also, in VSOP there is no way to exit prematurely such loop. Therefore, the \lstinline[style=vsop]{break} keyword was added. It also works for \lstinline[style=vsop]{while} loops.
+	
+	\subsection{Lets-In construct}
+	
+	In most programs, multiple new variables have to be declared. As said in the manual, this is quite painful to do with the \emph{let-in} construct.
+	
+	The \emph{lets-in} construct was introduced as a generalized \emph{let-in} construct.
+	\begin{lstlisting}[style=vsop]
+    lets = "lets" "(" field { "," field } ")" "in" expr ;
+	\end{lstlisting}
+	
+	\subsection{Missing operators}
+	
+	Some missing common operators where added : \lstinline[style=vsop]{"mod"}, \lstinline[style=vsop]{"or"}, \lstinline[style=vsop]{">"}, \lstinline[style=vsop]{">="} and \lstinline[style=vsop]{"!="}.
+	
+	\begin{note}
+	Equivalently to \lstinline[style=vsop]{"and"}, \lstinline[style=vsop]{"or"} is \emph{short-circuiting}.
+	\end{note}
+	
+	\subsection{Top-level functions}
+	
+	The possibility to define \emph{top-level functions}, \emph{i.e.} not linked to any class, was added to the language.
+	\begin{lstlisting}[style=vsop]
+    program = class | method { class | method } ;
+	\end{lstlisting}
+	
+	Furthermore, it isn't required anymore to define a class \texttt{Main} with a method \texttt{main} : a top-level function \texttt{main} with the right signature will do the trick.
+	
+	Also the method calling convention was modified a little bit : if \emph{no scope is provided}, VSOP will give priority to top-level functions, meaning that if an ambiguity between a top-level function and a class method arise, \emph{i.e.} if they have the same identifier, the function will be chosen. However, specifying a scope, including \lstinline[style=vsop]{"self"}, prevents from calling a top-level function.
+	
+	\subsection{Foreign function interface (FFI)}
+	
+	With the implementation of top-level functions, it was pretty natural to include the possibility of calling \emph{foreign functions} as well. As suggested in the manual, the keyword \lstinline[style=vsop]{"extern"} was added to declare the prototype of foreign functions.
+	
+	\begin{lstlisting}[style=vsop]
+	prototype = object-identifier "(" formals ")" ":" type ;
+    method    = prototype block
+              | "extern" prototype
+              | "extern" "vararg" prototype ;
+	\end{lstlisting}
+	
+	As one can see, external declarations are not bounded to top-level functions. Indeed, one could declare the prototype of a class method and link its definition (even in another language) at the \emph{linking} stage. With some further work, like the creation of \emph{header} files, this could easily lead to \emph{separate compilation}.
+	
+	Also, some foreign functions, like \texttt{printf}, have a \emph{variable} number of arguments. Those are said to be \emph{variadic} functions. Therefore the \lstinline[style=vsop]{"vararg"}\footnote{Commonly, the ellipsis symbol \lstinline[style=vsop]{"..."} is placed as the last formal to symbolize that a function is variadic. However, it wasn't easy to implement in VSOP without changing too much the grammar. } keyword was added so that such function could be declared and called within VSOP. It is however not possible to \emph{define} a variadic function/method within VSOP.
+	
+	In terms of AST textual representation, the declaration
+	
+	\begin{lstlisting}[style=vsop]
+	extern vararg printf ( s : string ) : int32 ;
+	\end{lstlisting}
+	
+	would look like
+	
+	\begin{lstlisting}[style=vsop]
+	Method(printf, [Formal(s, string)]..., int32)
+	\end{lstlisting}
+	
+	\subsection{Optimization passes}
+	
+	Some optimization passes were applied to the created functions using the \texttt{FunctionPassManager} of the \texttt{LLVM C++} API.
+	
+    For example, \texttt{CFGSimplificationPass} simplifies the control flow graph, deleting unreachable blocks or merging successive single-successor/predecessor blocks.
+	
+	\subsection{Test files}
+	
+	Some extended test files (\texttt{.vsopx}) are provided in the \texttt{tests} folder.
+	
+	\section{Limitations and retrospective}
+	
+	Even tough it is presented in the extension section of the manual, the \emph{garbage collector} should be a key feature of VSOP. Unfortunately, given that I made this project alone, I didn't have the time to implement it. However, it shouldn't be too hard as the \texttt{LLVM C++} API has some builtin procedure to add a GC to an existing module. Also, as said earlier, with a bit more work I could have implemented separate compilation.
+	
+	Another key feature of most imperative programming languages are arrays, that allow fast(er) data storage and access.
+	
+	Retrospectively, the choice that cost me the most time was probably the \emph{simple oriented-object} approach. Creating a \emph{visitor} could have helped to encapsulate better the different passes and to have more code shared among nodes.
+	
+	Also, the \texttt{LLVMHelper} class was actually created quite late (even after some extensions). It would have been \textbf{much} easier to implement the code generation with this helper available from the start.
+	
+	However, a choice I don't regret at all is the one to implement my compiler using \texttt{C++}, even-though it as drawbacks; the greatest of all being that is very hard to test small part of the code separately before all the files compile.
+	
+	\section{Feedback}
+	
+	As said earlier, I chose to realize this project completely alone, even though it was strongly advised to do it by group of two. I don't regret that choice as I tried a lot of different techniques, merging and rebasing a lot of commits, which is not very compatible with groups for a project of such \enquote{small} scale.
+	
+	As a consequence I spent a \textbf{lot} of time on this assignment. I estimate it to be between \SI{120}{h} and \SI{150}{h} -- I couldn't estimate the time precisely because of the rebase. However, all this time spent was pretty enjoyable as I learned quite a lot during my web searches. In fact, I believe that I will remember much longer what I learned in the project than in the theoretical course, even though the latter helped me quite a lot as they were strongly linked, which is a good point !
+	
+	\subsection{VSOP}
+	
+	In terms of the VSOP language itself, I think it could be interesting to include floating point arithmetic from the start as it is harder to include it afterwards as an extension.
+
+    Also, the special object identifier \lstinline[style=vsop]{"self"} is more of a keyword to me, as there are as many places where it cannot be used as places where it can. Furthermore, considering it as a keyword allows to detect invalid assignations (or declarations) to \lstinline[style=vsop]{"self"} earlier, \emph{i.e.} in the syntax analysis.
+    
+    I also find the use of \lstinline[style=vsop]{unit} as a type for fields and formals quite disturbing, and probably not very useful. The only usage I can see for fields is printing messages at initialization. Instead, the implementation of an explicit class \emph{constructor} could be used.
+    
+    Finally, I think a method with the return type \lstinline[style=vsop]{unit} shouldn't necessarily require its \lstinline[style=vsop]{block} to end by a \lstinline[style=vsop]{unit} value, similarly to \lstinline[style=vsop]{while} loops.
+	
+\end{document}
