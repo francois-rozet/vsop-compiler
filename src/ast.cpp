@@ -1134,15 +1134,14 @@ llvm::Value* Call::_codegen(Program& p, LLVMHelper& h) {
 		}
 
 		if (f) {
-			int align = m->parent ? 0 : 1;
 			int n = m->formals.size();
 
 			// Compare call with signature
-			if (args.size() + align == n or (m->variadic and args.size() + align > n)) {
+			if (args.size() == n or (m->variadic and args.size() > n)) {
 				bool valid = true;
 
 				for (int i = 0; i < args.size(); ++i) {
-					llvm::Type* param_t = (i + align < n) ? m->formals[i + align]->getType(h) : args[i]->getType();
+					llvm::Type* param_t = (i < n) ? m->formals[i]->getType(h) : args[i]->getType();
 
 					if (isUnit(args[i]->getType()) and isUnit(param_t));
 					else {
