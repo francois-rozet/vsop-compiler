@@ -70,7 +70,7 @@ The project was divided into four parts.
 3. The [semantic analysis](resources/pdf/semantic-analysis.pdf) performs the type and scope checking while traveling through the AST.
 
 	```bash
-	./vsopc -parse resources/vsop/functional/002-hello-world.vsop
+	./vsopc -check resources/vsop/functional/002-hello-world.vsop
 	```
 
 	```
